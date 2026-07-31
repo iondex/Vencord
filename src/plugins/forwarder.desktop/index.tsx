@@ -6,8 +6,9 @@
 
 import { definePluginSettings } from "@api/Settings";
 import { Flex } from "@components/Flex";
-import { Margins } from "@utils/margins";
+import { Devs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
+import { Margins } from "@utils/margins";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import type { MessageJSON } from "@vencord/discord-types";
 import { findByCodeLazy } from "@webpack";
@@ -16,7 +17,6 @@ import { Button, ChannelStore, Forms, GuildStore, showToast, Toasts, UserStore, 
 import { createForwarderStats, createHealthUrl, getForwardSkipReason } from "./logic";
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:49321/forward";
-const AUTHOR = { name: "iondex", id: 0n };
 
 const logger = new Logger("forwarder");
 const Native = VencordNative.pluginHelpers.forwarder as PluginNative<typeof import("./native")>;
@@ -364,7 +364,7 @@ function ForwarderSettings() {
 export default definePlugin({
     name: "forwarder",
     description: "Forwards Discord notification messages with metadata to a configurable HTTP server.",
-    authors: [AUTHOR],
+    authors: [Devs.iondex],
     tags: ["Notifications", "Utility"],
     settings,
 
