@@ -31,6 +31,29 @@ export interface EnabledChannelLogger {
     guildName: string;
 }
 
+export interface LoggerChannelMetadata {
+    id: string;
+    guildId: string;
+    guildName: string;
+    channelName: string;
+}
+
+export interface RemoteChannelStatusLike {
+    channelId: string;
+    guildId: string | null;
+    guildName: string | null;
+    channelName: string | null;
+    messageCount: number;
+    deletedCount: number;
+    oldestMessageAt: string | null;
+    newestMessageAt: string | null;
+}
+
+export interface ChannelDirectoryEntry extends EnabledChannelLogger {
+    state: "recording" | "closing" | "stopped";
+    status: RemoteChannelStatusLike | null;
+}
+
 export interface SendResult {
     ok: boolean;
     status: number;
@@ -205,6 +228,58 @@ export function parseEnabledChannels(value: string): EnabledChannelLogger[] {
 
 export function serializeEnabledChannels(channels: EnabledChannelLogger[]) {
     return JSON.stringify(channels);
+}
+
+export function createChannelMetadata(
+    channelId: string,
+    channel: { id?: string; guild_id?: string | null; name?: string; } | null | undefined,
+    guild: { id?: string; name?: string; } | null | undefined,
+    saved: EnabledChannelLogger | null | undefined,
+): LoggerChannelMetadata | null {
+    const guildId = channel?.guild_id ?? saved?.guildId;
+    const guildName = guild?.name || saved?.guildName;
+    const channelName = channel?.name || saved?.channelName;
+    if (!guildId || !guildName || !channelName) return null;
+
+    return { id: channelId, guildId, guildName, channelName };
+}
+
+export function buildChannelDirectory(
+    enabled: EnabledChannelLogger[],
+    closing: EnabledChannelLogger[],
+    remote: RemoteChannelStatusLike[],
+): ChannelDirectoryEntry[] {
+    const entries = new Map<string, ChannelDirectoryEntry>();
+    for (const channel of enabled) {
+        entries.set(channel.channelId, { ...channel, state: "recording", status: null });
+    }
+    for (const channel of closing) {
+        if (!entries.has(channel.channelId)) {
+            entries.set(channel.channelId, { ...channel, state: "closing", status: null });
+        }
+    }
+    for (const status of remote) {
+        const existing = entries.get(status.channelId);
+        if (existing) {
+            existing.status = status;
+            continue;
+        }
+        entries.set(status.channelId, {
+            channelId: status.channelId,
+            guildId: status.guildId ?? "unknown",
+            guildName: status.guildName ?? "未知服务器",
+            channelName: status.channelName ?? status.channelId,
+            state: "stopped",
+            status,
+        });
+    }
+
+    const stateOrder = { recording: 0, closing: 1, stopped: 2 } as const;
+    return Array.from(entries.values()).sort((left, right) =>
+        stateOrder[left.state] - stateOrder[right.state]
+        || (right.status?.newestMessageAt ?? "").localeCompare(left.status?.newestMessageAt ?? "")
+        || right.channelId.localeCompare(left.channelId)
+    );
 }
 
 export function validateHealthResult(result: SendResult) {

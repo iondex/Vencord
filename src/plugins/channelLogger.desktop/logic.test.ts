@@ -7,9 +7,11 @@
 import assert from "node:assert/strict";
 
 import {
+    buildChannelDirectory,
     ChannelBatchQueue,
     collectCachedMessages,
     createApiUrl,
+    createChannelMetadata,
     createMessageLogRecord,
     FLUSH_INTERVAL_MS,
     MAX_BATCH_RECORDS,
@@ -89,11 +91,75 @@ assert.equal(createApiUrl("http://127.0.0.1:49322", "/api/health"), "http://127.
 assert.equal(createApiUrl("http://localhost:5000/", "/api/channels/10/status"), "http://localhost:5000/api/channels/10/status");
 assert.equal(createApiUrl("https://example.com", "/api/health"), null);
 assert.equal(createApiUrl("http://192.168.1.2:49322", "/api/health"), null);
+assert.equal(createApiUrl("http://127.0.0.1:49322", "/api/channels/status"), "http://127.0.0.1:49322/api/channels/status");
+
+assert.deepEqual(createChannelMetadata(
+    "10",
+    { id: "10", guild_id: "1", name: "current-channel" },
+    { id: "1", name: "Current Guild" },
+    { channelId: "10", guildId: "1", channelName: "saved-channel", guildName: "Saved Guild" },
+), {
+    id: "10",
+    guildId: "1",
+    guildName: "Current Guild",
+    channelName: "current-channel",
+});
+assert.deepEqual(createChannelMetadata(
+    "10",
+    null,
+    null,
+    { channelId: "10", guildId: "1", channelName: "saved-channel", guildName: "Saved Guild" },
+), {
+    id: "10",
+    guildId: "1",
+    guildName: "Saved Guild",
+    channelName: "saved-channel",
+});
+assert.deepEqual(createChannelMetadata(
+    "10",
+    { id: "10", guild_id: "1", name: "" },
+    { id: "1", name: "" },
+    { channelId: "10", guildId: "1", channelName: "saved-channel", guildName: "Saved Guild" },
+), {
+    id: "10",
+    guildId: "1",
+    guildName: "Saved Guild",
+    channelName: "saved-channel",
+});
 
 const enabled = [
     { channelId: "10", guildId: "1", channelName: "general", guildName: "Guild" },
     { channelId: "11", guildId: "1", channelName: "thread", guildName: "Guild" },
 ];
+const remoteStatuses = [{
+    channelId: "10",
+    guildId: "1",
+    guildName: "Guild",
+    channelName: "general",
+    messageCount: 20,
+    deletedCount: 1,
+    oldestMessageAt: "2026-07-01T00:00:00.000Z",
+    newestMessageAt: "2026-07-31T00:00:00.000Z",
+}, {
+    channelId: "12",
+    guildId: "1",
+    guildName: "Guild",
+    channelName: "archive",
+    messageCount: 10,
+    deletedCount: 0,
+    oldestMessageAt: "2026-06-01T00:00:00.000Z",
+    newestMessageAt: "2026-06-30T00:00:00.000Z",
+}];
+assert.deepEqual(buildChannelDirectory(
+    [enabled[0]],
+    [enabled[1]],
+    remoteStatuses,
+).map(item => [item.channelId, item.state, item.status?.messageCount ?? null]), [
+    ["10", "recording", 20],
+    ["11", "closing", null],
+    ["12", "stopped", 10],
+]);
+
 assert.deepEqual(parseEnabledChannels(serializeEnabledChannels(enabled)), enabled);
 assert.deepEqual(parseEnabledChannels("invalid"), []);
 assert.equal(validateHealthResult({

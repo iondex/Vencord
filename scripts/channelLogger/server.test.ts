@@ -16,7 +16,7 @@ import { ChannelLogStore } from "./storage";
 async function main() {
     const directory = await mkdtemp(join(tmpdir(), "vencord-channel-logger-http-"));
     const store = new ChannelLogStore(directory, () => "2026-07-31T14:00:00.000Z");
-    const server = createChannelLoggerServer({ store, maxBodyBytes: 1024 });
+    const server = createChannelLoggerServer({ store, maxBodyBytes: 1024, downloadPageSize: 1 });
 
     try {
     await new Promise<void>((resolve, reject) => {
@@ -40,18 +40,34 @@ async function main() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+            channel: {
+                id: "10",
+                guildId: "1",
+                guildName: "Guild",
+                channelName: "general",
+            },
             records: [
                 {
                     type: "message",
                     messageId: "100",
                     observedAt: "2026-07-31T12:00:00.000Z",
-                    payload: { id: "100", channel_id: "10", content: "older" }
+                    payload: {
+                        id: "100",
+                        channel_id: "10",
+                        content: "older",
+                        timestamp: "2026-07-31T12:00:00.000Z",
+                    }
                 },
                 {
                     type: "message",
                     messageId: "101",
                     observedAt: "2026-07-31T12:01:00.000Z",
-                    payload: { id: "101", channel_id: "10", content: "newer" }
+                    payload: {
+                        id: "101",
+                        channel_id: "10",
+                        content: "newer",
+                        timestamp: "2026-07-31T12:01:00.000Z",
+                    }
                 }
             ]
         })
@@ -71,14 +87,24 @@ async function main() {
     assert.equal(statusResponse.status, 200);
     assert.deepEqual(await statusResponse.json(), {
         channelId: "10",
+        guildId: "1",
+        guildName: "Guild",
+        channelName: "general",
         messageCount: 2,
         versionCount: 2,
         deletedCount: 0,
         duplicateCount: 0,
+        oldestMessageAt: "2026-07-31T12:00:00.000Z",
+        newestMessageAt: "2026-07-31T12:01:00.000Z",
         firstObservedAt: "2026-07-31T12:00:00.000Z",
         lastObservedAt: "2026-07-31T12:01:00.000Z",
         lastWriteAt: "2026-07-31T14:00:00.000Z",
     });
+
+    const allStatusResponse = await fetch(`${baseUrl}/api/channels/status`);
+    assert.equal(allStatusResponse.status, 200);
+    const allStatus = await allStatusResponse.json() as any;
+    assert.deepEqual(allStatus.channels, [store.status("10")]);
 
     const downloadResponse = await fetch(`${baseUrl}/api/channels/10/download`);
     assert.equal(downloadResponse.status, 200);
@@ -108,6 +134,37 @@ async function main() {
     });
     assert.equal(invalidResponse.status, 400);
     assert.equal((await invalidResponse.json() as any).error, "invalid_request");
+
+    for (const messageId of ["0102", "9999999999999999999"]) {
+        const invalidSnowflakeResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                channel: {
+                    id: "10",
+                    guildId: "1",
+                    guildName: "Guild",
+                    channelName: "general",
+                },
+                records: [{
+                    type: "message",
+                    messageId,
+                    observedAt: "2026-07-31T12:02:00.000Z",
+                    payload: { id: messageId, channel_id: "10" },
+                }],
+            })
+        });
+        assert.equal(invalidSnowflakeResponse.status, 400);
+        assert.match((await invalidSnowflakeResponse.json() as any).message, /invalid metadata/);
+    }
+
+    const missingChannelResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ records: [] })
+    });
+    assert.equal(missingChannelResponse.status, 400);
+    assert.equal((await missingChannelResponse.json() as any).error, "invalid_request");
 
     const textResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
         method: "POST",

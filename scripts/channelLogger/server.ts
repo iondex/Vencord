@@ -6,11 +6,12 @@
 
 import { createServer, IncomingMessage, Server, ServerResponse } from "node:http";
 
-import { ChannelLogRecord, ChannelLogStore } from "./storage";
+import { ChannelLogRecord, ChannelLogStore, ChannelMetadata, isCanonicalSnowflake, VersionCursor } from "./storage";
 
 interface ServerOptions {
     store: ChannelLogStore;
     maxBodyBytes?: number;
+    downloadPageSize?: number;
     log?: (message: string) => void;
 }
 
@@ -74,8 +75,7 @@ function validateRecords(channelId: string, body: unknown): ChannelLogRecord[] {
             throw new HttpError(400, "invalid_request", `records[${index}] must be an object`);
         }
         if ((record.type !== "message" && record.type !== "delete")
-            || typeof record.messageId !== "string"
-            || !/^\d{1,32}$/.test(record.messageId)
+            || !isCanonicalSnowflake(record.messageId)
             || !isTimestamp(record.observedAt)) {
             throw new HttpError(400, "invalid_request", `records[${index}] has invalid metadata`);
         }
@@ -103,6 +103,25 @@ function validateRecords(channelId: string, body: unknown): ChannelLogRecord[] {
             payload: record.payload,
         };
     });
+}
+
+function validateChannelMetadata(channelId: string, body: unknown): ChannelMetadata {
+    const channel = body && typeof body === "object" ? (body as any).channel : undefined;
+    if (!channel || typeof channel !== "object"
+        || String(channel.id) !== channelId
+        || !isCanonicalSnowflake(channel.guildId)
+        || typeof channel.guildName !== "string"
+        || typeof channel.channelName !== "string"
+        || channel.guildName.length > 200
+        || channel.channelName.length > 200) {
+        throw new HttpError(400, "invalid_request", "Body contains invalid channel metadata");
+    }
+
+    return {
+        guildId: channel.guildId,
+        guildName: channel.guildName,
+        channelName: channel.channelName,
+    };
 }
 
 export async function writeChunk(response: ServerResponse, chunk: string) {
@@ -133,7 +152,12 @@ export async function writeChunk(response: ServerResponse, chunk: string) {
     });
 }
 
-async function streamDownload(response: ServerResponse, store: ChannelLogStore, channelId: string) {
+async function streamDownload(
+    response: ServerResponse,
+    store: ChannelLogStore,
+    channelId: string,
+    pageSize: number,
+) {
     const status = store.status(channelId);
     const exportedAt = new Date().toISOString();
     const filename = `channel-${channelId}-${exportedAt.slice(0, 10)}.json`;
@@ -153,25 +177,38 @@ async function streamDownload(response: ServerResponse, store: ChannelLogStore, 
         completeness: "visible-loaded-messages-only",
         messageCount: status.messageCount,
         deletedCount: status.deletedCount,
+        oldestMessageAt: status.oldestMessageAt,
+        newestMessageAt: status.newestMessageAt,
     })},"messages":[`);
 
     let separator = "";
-    for (const message of store.exportMessages(channelId)) {
-        await writeChunk(response, separator + JSON.stringify(message));
-        separator = ",";
-    }
+    let messageCursor: string | null = null;
+    do {
+        const page = store.readMessagePage(channelId, messageCursor, pageSize);
+        for (const message of page.items) {
+            await writeChunk(response, separator + JSON.stringify(message));
+            separator = ",";
+        }
+        messageCursor = page.nextCursor;
+    } while (messageCursor != null);
     await writeChunk(response, `],"messageVersions":[`);
     separator = "";
-    for (const version of store.exportVersions(channelId)) {
-        await writeChunk(response, separator + JSON.stringify(version));
-        separator = ",";
-    }
+    let versionCursor: VersionCursor | null = null;
+    do {
+        const page = store.readVersionPage(channelId, versionCursor, pageSize);
+        for (const version of page.items) {
+            await writeChunk(response, separator + JSON.stringify(version));
+            separator = ",";
+        }
+        versionCursor = page.nextCursor;
+    } while (versionCursor != null);
     response.end("]}");
 }
 
 export function createChannelLoggerServer({
     store,
     maxBodyBytes = 1024 * 1024,
+    downloadPageSize = 250,
     log = () => undefined,
 }: ServerOptions): Server {
     return createServer(async (request, response) => {
@@ -184,10 +221,17 @@ export function createChannelLoggerServer({
                 sendJson(response, 200, { ok: true, service: "vencord-channel-logger", version: 1 });
                 return;
             }
+            if (method === "GET" && url.pathname === "/api/channels/status") {
+                sendJson(response, 200, { channels: store.listStatuses() });
+                return;
+            }
 
             const match = /^\/api\/channels\/(\d{1,32})\/(log|status|download)$/.exec(url.pathname);
             if (!match) throw new HttpError(404, "not_found", "Endpoint not found");
             const [, channelId, action] = match;
+            if (!isCanonicalSnowflake(channelId)) {
+                throw new HttpError(400, "invalid_request", "Channel ID must be a canonical Discord snowflake");
+            }
 
             if (method === "POST" && action === "log") {
                 if (request.headers.origin != null) {
@@ -199,7 +243,8 @@ export function createChannelLoggerServer({
                 }
                 const body = await readJsonBody(request, maxBodyBytes);
                 const records = validateRecords(channelId, body);
-                const result = store.log(channelId, records);
+                const metadata = validateChannelMetadata(channelId, body);
+                const result = store.log(channelId, records, metadata);
                 sendJson(response, 200, { ok: true, ...result });
                 log(`POST channel=${channelId} records=${records.length} durationMs=${(performance.now() - startedAt).toFixed(1)}`);
                 return;
@@ -209,7 +254,7 @@ export function createChannelLoggerServer({
                 return;
             }
             if (method === "GET" && action === "download") {
-                await streamDownload(response, store, channelId);
+                await streamDownload(response, store, channelId, downloadPageSize);
                 log(`GET download channel=${channelId} durationMs=${(performance.now() - startedAt).toFixed(1)}`);
                 return;
             }

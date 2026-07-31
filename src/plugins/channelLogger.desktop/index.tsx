@@ -28,14 +28,17 @@ import {
 } from "@webpack/common";
 
 import {
+    buildChannelDirectory,
     ChannelBatchQueue,
     collectCachedMessages,
     createApiUrl,
+    createChannelMetadata,
     createDeleteLogRecord,
     createMessageLogRecord,
     EnabledChannelLogger,
     isSupportedGuildChannel,
     parseEnabledChannels,
+    RemoteChannelStatusLike,
     serializeEnabledChannels,
     validateHealthResult,
     validateLogResult,
@@ -71,7 +74,23 @@ const queue = new ChannelBatchQueue(async (channelId, records) => {
     const url = createApiUrl(settings.store.serverUrl.trim(), `/api/channels/${channelId}/log`);
     if (!url) return { ok: false, status: -1, body: "Logger URL must be loopback HTTP" };
 
-    const result = validateLogResult(await Native.post(url, { records }), records.length);
+    const saved = getEnabledChannels().find(channel => channel.channelId === channelId)
+        ?? closingChannels.get(channelId);
+    const channel = ChannelStore.getChannel(channelId);
+    const guildId = channel?.guild_id ?? saved?.guildId;
+    const metadata = createChannelMetadata(
+        channelId,
+        channel,
+        guildId ? GuildStore.getGuild(guildId) : null,
+        saved,
+    );
+    if (!metadata) {
+        const body = "Unable to resolve required channel metadata";
+        pluginLogger.error(`Failed channel=${channelId}`, body);
+        return { ok: false, status: -1, body };
+    }
+
+    const result = validateLogResult(await Native.post(url, { channel: metadata, records }), records.length);
     if (!result.ok) pluginLogger.error(`Failed channel=${channelId} status=${result.status}`, result.body);
     return result;
 });
@@ -104,12 +123,17 @@ interface BulkDeleteEvent {
     ids: string[];
 }
 
-interface RemoteChannelStatus {
+interface RemoteChannelStatus extends RemoteChannelStatusLike {
     channelId: string;
+    guildId: string | null;
+    guildName: string | null;
+    channelName: string | null;
     messageCount: number;
     versionCount: number;
     deletedCount: number;
     duplicateCount: number;
+    oldestMessageAt: string | null;
+    newestMessageAt: string | null;
     firstObservedAt: string | null;
     lastObservedAt: string | null;
     lastWriteAt: string | null;
@@ -223,29 +247,36 @@ function formatBytes(bytes: number) {
     return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }
 
+function formatMessageTime(value: string | null) {
+    if (!value) return "未知";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "未知" : date.toLocaleString();
+}
+
 function LoggerSettings() {
     const pluginSettings = settings.use(["serverUrl", "enabledChannels"]);
     const enabledChannels = parseEnabledChannels(pluginSettings.enabledChannels);
-    const enabledIds = new Set(enabledChannels.map(channel => channel.channelId));
-    const channels = [
-        ...enabledChannels,
-        ...Array.from(closingChannels.values()).filter(channel => !enabledIds.has(channel.channelId)),
-    ];
     const [, setQueueVersion] = useState(0);
     const [checking, setChecking] = useState(false);
     const [health, setHealth] = useState<{ ok: boolean | null; message: string; }>({
         ok: null,
         message: "尚未检查",
     });
-    const [remoteStatuses, setRemoteStatuses] = useState<Record<string, RemoteChannelStatus>>({});
+    const [remoteStatuses, setRemoteStatuses] = useState<RemoteChannelStatus[]>([]);
+    const channels = buildChannelDirectory(
+        enabledChannels,
+        Array.from(closingChannels.values()),
+        remoteStatuses,
+    );
 
     useEffect(() => queue.subscribe(() => setQueueVersion(value => value + 1)), []);
+    useEffect(() => void checkHealthAndStatuses(true), [pluginSettings.serverUrl]);
 
-    async function checkHealthAndStatuses() {
+    async function checkHealthAndStatuses(silent = false) {
         const healthUrl = createApiUrl(pluginSettings.serverUrl.trim(), "/api/health");
         if (!healthUrl) {
             setHealth({ ok: false, message: "服务地址必须是本机 HTTP 地址" });
-            showToast("Channel logger 服务地址无效", Toasts.Type.FAILURE);
+            if (!silent) showToast("Channel logger 服务地址无效", Toasts.Type.FAILURE);
             return;
         }
 
@@ -257,24 +288,33 @@ function LoggerSettings() {
                 : `连接失败 (${healthResult.status}): ${healthResult.body}`;
             setHealth({ ok: false, message });
             setChecking(false);
-            showToast(message, Toasts.Type.FAILURE);
+            if (!silent) showToast(message, Toasts.Type.FAILURE);
             return;
         }
 
-        const statusEntries = await Promise.all(channels.map(async channel => {
-            const statusUrl = createApiUrl(pluginSettings.serverUrl.trim(), `/api/channels/${channel.channelId}/status`)!;
-            const result = await Native.get(statusUrl);
-            if (!result.ok) return [channel.channelId, null] as const;
-            try {
-                return [channel.channelId, JSON.parse(result.body) as RemoteChannelStatus] as const;
-            } catch {
-                return [channel.channelId, null] as const;
-            }
-        }));
-        setRemoteStatuses(Object.fromEntries(statusEntries.filter((entry): entry is [string, RemoteChannelStatus] => entry[1] != null)));
+        const statusUrl = createApiUrl(pluginSettings.serverUrl.trim(), "/api/channels/status")!;
+        const statusResult = await Native.get(statusUrl);
+        if (!statusResult.ok) {
+            const message = `读取频道状态失败 (${statusResult.status}): ${statusResult.body}`;
+            setHealth({ ok: false, message });
+            setChecking(false);
+            if (!silent) showToast(message, Toasts.Type.FAILURE);
+            return;
+        }
+        try {
+            const body = JSON.parse(statusResult.body);
+            if (!Array.isArray(body?.channels)) throw new Error("channels must be an array");
+            setRemoteStatuses(body.channels as RemoteChannelStatus[]);
+        } catch (error) {
+            const message = `频道状态响应无效: ${error instanceof Error ? error.message : String(error)}`;
+            setHealth({ ok: false, message });
+            setChecking(false);
+            if (!silent) showToast(message, Toasts.Type.FAILURE);
+            return;
+        }
         setHealth({ ok: true, message: `服务正常 (${healthResult.status}) · ${new Date().toLocaleTimeString()}` });
         setChecking(false);
-        showToast("Channel logger 服务正常", Toasts.Type.SUCCESS);
+        if (!silent) showToast("Channel logger 服务正常", Toasts.Type.SUCCESS);
     }
 
     function download(channelId: string) {
@@ -303,7 +343,7 @@ function LoggerSettings() {
                             {pluginSettings.serverUrl}
                         </Forms.FormText>
                     </div>
-                    <Button size="small" onClick={() => void checkHealthAndStatuses()} disabled={checking}>
+                    <Button size="small" onClick={() => void checkHealthAndStatuses(false)} disabled={checking}>
                         <RestartIcon width={16} height={16} />
                         {checking ? "检查中…" : "Health check"}
                     </Button>
@@ -311,12 +351,11 @@ function LoggerSettings() {
             </section>
 
             <section>
-                <Forms.FormTitle tag="h3">已开启的频道 logger</Forms.FormTitle>
-                {channels.length === 0 && <Forms.FormText>没有已开启的频道。</Forms.FormText>}
+                <Forms.FormTitle tag="h3">频道消息记录</Forms.FormTitle>
+                {channels.length === 0 && <Forms.FormText>本地服务中没有频道记录。</Forms.FormText>}
                 {channels.map(channel => {
-                    const closing = closingChannels.has(channel.channelId) && !enabledIds.has(channel.channelId);
                     const runtime = queue.status(channel.channelId);
-                    const remote = remoteStatuses[channel.channelId];
+                    const remote = channel.status as RemoteChannelStatus | null;
                     const currentChannel = ChannelStore.getChannel(channel.channelId);
                     const currentGuild = GuildStore.getGuild(channel.guildId);
                     const channelName = currentChannel?.name ?? channel.channelName;
@@ -333,10 +372,16 @@ function LoggerSettings() {
                             <div style={{ minWidth: 0 }}>
                                 <Forms.FormText><strong>{guildName} / #{channelName}</strong></Forms.FormText>
                                 <Forms.FormText style={{ color: "var(--text-muted)", overflowWrap: "anywhere" }}>
-                                    {closing ? "正在关闭 · " : ""}
-                                    {channel.channelId} · 待发送 {runtime.pendingRecords} 条 / {formatBytes(runtime.pendingBytes)}
-                                    {remote ? ` · 已保存 ${remote.messageCount} 条 · 已标记删除 ${remote.deletedCount} 条` : ""}
+                                    {channel.state === "recording" ? "记录中" : channel.state === "closing" ? "正在关闭" : "已停止"}
+                                    {` · ${channel.channelId}`}
+                                    {channel.state !== "stopped" ? ` · 待发送 ${runtime.pendingRecords} 条 / ${formatBytes(runtime.pendingBytes)}` : ""}
                                 </Forms.FormText>
+                                {remote && (
+                                    <Forms.FormText style={{ color: "var(--text-muted)", overflowWrap: "anywhere" }}>
+                                        已保存 {remote.messageCount} 条 · 已标记删除 {remote.deletedCount} 条
+                                        {` · 消息时间 ${formatMessageTime(remote.oldestMessageAt)} - ${formatMessageTime(remote.newestMessageAt)}`}
+                                    </Forms.FormText>
+                                )}
                                 {runtime.lastError && (
                                     <Forms.FormText style={{ color: "var(--text-danger)", overflowWrap: "anywhere" }}>
                                         {runtime.lastError}
@@ -344,7 +389,7 @@ function LoggerSettings() {
                                 )}
                             </div>
                             <Flex gap="8px" style={{ flex: "0 0 auto" }}>
-                                <Tooltip text="从本地 logger 服务下载 JSON">
+                                {remote && <Tooltip text="从本地 logger 服务下载 JSON">
                                     {tooltipProps => (
                                         <Button
                                             {...tooltipProps}
@@ -356,8 +401,8 @@ function LoggerSettings() {
                                             <CloudDownloadIcon width={18} height={18} />
                                         </Button>
                                     )}
-                                </Tooltip>
-                                {!closing && (
+                                </Tooltip>}
+                                {channel.state === "recording" && (
                                     <Tooltip text="停止记录；保留服务端历史">
                                         {tooltipProps => (
                                             <Button
