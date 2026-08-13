@@ -96,7 +96,6 @@ interface Scheduler {
 }
 
 interface MessageLike {
-    [key: string]: unknown;
     id?: string;
     channel_id?: string;
     channelId?: string;
@@ -145,8 +144,8 @@ export function toJsonValue(value: unknown) {
     }));
 }
 
-export function createMessageLogRecord(
-    message: MessageLike,
+export function createMessageLogRecord<T extends MessageLike>(
+    message: T,
     observedAt: string,
     capture: MessageCaptureMetadata,
 ): MessageLogRecord | null {
