@@ -45,7 +45,6 @@ const settings = definePluginSettings({
         type: OptionType.STRING,
         description: "DingTalk robot webhook used for final failure alerts",
         default: DEFAULT_DINGTALK_WEBHOOK_URL,
-        componentProps: { type: "password" },
         disabled() { return !this.store.enableDingTalkAlerts; },
     },
     logFailures: {

@@ -25,7 +25,7 @@ The plugin keeps the existing settings and adds:
 
 - `fallbackUrl`: defaults to `https://forwarder.yufeng.run/forward`. An empty value disables fallback.
 - `enableDingTalkAlerts`: defaults to `true`.
-- `dingTalkWebhookUrl`: defaults to the supplied DingTalk robot URL. The settings UI renders this value as a password field.
+- `dingTalkWebhookUrl`: defaults to the supplied DingTalk robot URL and is shown as a normal text field in settings.
 
 The DingTalk webhook remains present in Vencord's locally persisted settings because the current settings system has no separate secret store for plugin options. Logs, results, health displays, and DingTalk messages must redact sensitive query values such as `access_token`, `token`, and `key`.
 

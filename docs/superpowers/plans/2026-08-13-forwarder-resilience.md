@@ -56,7 +56,7 @@ Have exported `send(event, request)` delegate to `sendWithResilience()` using re
 
 - [ ] **Step 1: Add settings defaults**
 
-Add `fallbackUrl` with `https://forwarder.yufeng.run/forward`, `enableDingTalkAlerts` with `true`, and `dingTalkWebhookUrl` with the approved webhook. Render the webhook string input with `componentProps: { type: "password" }` and disable it when alerts are off.
+Add `fallbackUrl` with `https://forwarder.yufeng.run/forward`, `enableDingTalkAlerts` with `true`, and `dingTalkWebhookUrl` with the approved webhook. Render the webhook as a normal string input and disable it when alerts are off.
 
 - [ ] **Step 2: Use the resilient send request**
 
