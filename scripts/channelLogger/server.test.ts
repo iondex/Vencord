@@ -16,7 +16,7 @@ import { ChannelLogStore } from "./storage";
 async function main() {
     const directory = await mkdtemp(join(tmpdir(), "vencord-channel-logger-http-"));
     const store = new ChannelLogStore(directory, () => "2026-07-31T14:00:00.000Z");
-    const server = createChannelLoggerServer({ store, maxBodyBytes: 1024, downloadPageSize: 1 });
+    const server = createChannelLoggerServer({ store, downloadPageSize: 1 });
 
     try {
     await new Promise<void>((resolve, reject) => {
@@ -33,10 +33,20 @@ async function main() {
     assert.deepEqual(await healthResponse.json(), {
         ok: true,
         service: "vencord-channel-logger",
-        version: 1,
+        version: 2,
     });
 
-    const postResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
+    const legacyPostResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            channel: { id: "10", guildId: "1", guildName: "Guild", channelName: "general" },
+            records: [],
+        }),
+    });
+    assert.equal(legacyPostResponse.status, 404);
+
+    const postResponse = await fetch(`${baseUrl}/api/v2/channels/10/log`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -51,6 +61,9 @@ async function main() {
                     type: "message",
                     messageId: "100",
                     observedAt: "2026-07-31T12:00:00.000Z",
+                    eventType: "load",
+                    payloadKind: "snapshot",
+                    payloadSource: "flux-event",
                     payload: {
                         id: "100",
                         channel_id: "10",
@@ -62,6 +75,9 @@ async function main() {
                     type: "message",
                     messageId: "101",
                     observedAt: "2026-07-31T12:01:00.000Z",
+                    eventType: "create",
+                    payloadKind: "snapshot",
+                    payloadSource: "flux-event",
                     payload: {
                         id: "101",
                         channel_id: "10",
@@ -83,7 +99,38 @@ async function main() {
         ignoredDeletes: 0,
     });
 
-    const statusResponse = await fetch(`${baseUrl}/api/channels/10/status`);
+    const disguisedPatchResponse = await fetch(`${baseUrl}/api/v2/channels/10/log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            channel: {
+                id: "10",
+                guildId: "1",
+                guildName: "Guild",
+                channelName: "general",
+            },
+            records: [{
+                type: "message",
+                messageId: "100",
+                observedAt: "2026-07-31T12:00:30.000Z",
+                eventType: "update",
+                payloadKind: "snapshot",
+                payloadSource: "flux-event",
+                payload: {
+                    id: "100",
+                    channel_id: "10",
+                    edited_timestamp: "2026-07-31T12:00:30.000Z",
+                },
+            }],
+        })
+    });
+    assert.equal(disguisedPatchResponse.status, 400);
+    assert.match((await disguisedPatchResponse.json() as any).message, /invalid capture metadata/);
+
+    const unchangedMessages = store.readMessagePage("10", null, 10).items;
+    assert.equal(unchangedMessages.find(item => item.payload.id === "100")?.payload.content, "older");
+
+    const statusResponse = await fetch(`${baseUrl}/api/v2/channels/10/status`);
     assert.equal(statusResponse.status, 200);
     assert.deepEqual(await statusResponse.json(), {
         channelId: "10",
@@ -92,6 +139,7 @@ async function main() {
         channelName: "general",
         messageCount: 2,
         versionCount: 2,
+        eventCount: 2,
         deletedCount: 0,
         duplicateCount: 0,
         oldestMessageAt: "2026-07-31T12:00:00.000Z",
@@ -101,33 +149,52 @@ async function main() {
         lastWriteAt: "2026-07-31T14:00:00.000Z",
     });
 
-    const allStatusResponse = await fetch(`${baseUrl}/api/channels/status`);
+    const allStatusResponse = await fetch(`${baseUrl}/api/v2/channels/status`);
     assert.equal(allStatusResponse.status, 200);
     const allStatus = await allStatusResponse.json() as any;
     assert.deepEqual(allStatus.channels, [store.status("10")]);
 
-    const downloadResponse = await fetch(`${baseUrl}/api/channels/10/download`);
+    const downloadResponse = await fetch(`${baseUrl}/api/v2/channels/10/download`);
     assert.equal(downloadResponse.status, 200);
     assert.match(downloadResponse.headers.get("content-disposition") ?? "", /^attachment; filename="channel-10-/);
     const download = await downloadResponse.json() as any;
     assert.equal(download.export.order, "newest-first");
-    assert.equal(download.export.payloadKind, "discord-client-message-record");
+    assert.equal(download.export.version, 2);
+    assert.equal(download.export.payloadKinds.messageEvents, "captured-flux-events-and-client-snapshots");
     assert.deepEqual(download.messages.map((item: any) => item.payload.id), ["101", "100"]);
     assert.deepEqual(download.messageVersions.map((item: any) => item.payload.id), ["101", "100"]);
+    assert.deepEqual(download.messageEvents.map((item: any) => item.eventType), ["create", "load"]);
 
-    const oversizedResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
+    const unrestrictedResponse = await fetch(`${baseUrl}/api/v2/channels/10/log`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ records: [{ padding: "x".repeat(2048) }] })
+        body: JSON.stringify({
+            channel: {
+                id: "10",
+                guildId: "1",
+                guildName: "Guild",
+                channelName: "general",
+            },
+            records: [{
+                type: "message",
+                messageId: "102",
+                observedAt: "2026-07-31T12:02:00.000Z",
+                eventType: "create",
+                payloadKind: "snapshot",
+                payloadSource: "flux-event",
+                payload: {
+                    id: "102",
+                    channel_id: "10",
+                    content: "x".repeat(1024 * 1024 + 1),
+                    timestamp: "2026-07-31T12:02:00.000Z",
+                },
+            }],
+        })
     });
-    assert.equal(oversizedResponse.status, 413);
-    assert.deepEqual(await oversizedResponse.json(), {
-        ok: false,
-        error: "request_too_large",
-        message: "Request body exceeds 1024 bytes"
-    });
+    assert.equal(unrestrictedResponse.status, 200);
+    assert.equal((await unrestrictedResponse.json() as any).inserted, 1);
 
-    const invalidResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
+    const invalidResponse = await fetch(`${baseUrl}/api/v2/channels/10/log`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ records: [{ type: "message", messageId: "wrong-channel", payload: { channel_id: "11" } }] })
@@ -136,7 +203,7 @@ async function main() {
     assert.equal((await invalidResponse.json() as any).error, "invalid_request");
 
     for (const messageId of ["0102", "9999999999999999999"]) {
-        const invalidSnowflakeResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
+        const invalidSnowflakeResponse = await fetch(`${baseUrl}/api/v2/channels/10/log`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -158,7 +225,7 @@ async function main() {
         assert.match((await invalidSnowflakeResponse.json() as any).message, /invalid metadata/);
     }
 
-    const missingChannelResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
+    const missingChannelResponse = await fetch(`${baseUrl}/api/v2/channels/10/log`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ records: [] })
@@ -166,7 +233,7 @@ async function main() {
     assert.equal(missingChannelResponse.status, 400);
     assert.equal((await missingChannelResponse.json() as any).error, "invalid_request");
 
-    const textResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
+    const textResponse = await fetch(`${baseUrl}/api/v2/channels/10/log`, {
         method: "POST",
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify({ records: [] })
@@ -174,7 +241,7 @@ async function main() {
     assert.equal(textResponse.status, 415);
     assert.equal((await textResponse.json() as any).error, "unsupported_media_type");
 
-    const originResponse = await fetch(`${baseUrl}/api/channels/10/log`, {
+    const originResponse = await fetch(`${baseUrl}/api/v2/channels/10/log`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",

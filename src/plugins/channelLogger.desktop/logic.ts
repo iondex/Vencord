@@ -7,14 +7,19 @@
 export const FLUSH_INTERVAL_MS = 50;
 export const MAX_BATCH_RECORDS = 100;
 export const TARGET_BATCH_BYTES = 512 * 1024;
-export const MAX_REQUEST_BYTES = 1024 * 1024;
+export const LOGGER_API_PREFIX = "/api/v2";
 
 export interface MessageLogRecord {
     type: "message";
     messageId: string;
     observedAt: string;
+    eventType: "load" | "create" | "update" | "cache";
+    payloadKind: "snapshot" | "patch";
+    payloadSource: "flux-event" | "message-store";
     payload: Record<string, unknown>;
 }
+
+export type MessageCaptureMetadata = Pick<MessageLogRecord, "eventType" | "payloadKind" | "payloadSource">;
 
 export interface DeleteLogRecord {
     type: "delete";
@@ -44,6 +49,7 @@ export interface RemoteChannelStatusLike {
     guildName: string | null;
     channelName: string | null;
     messageCount: number;
+    eventCount: number;
     deletedCount: number;
     oldestMessageAt: string | null;
     newestMessageAt: string | null;
@@ -139,7 +145,11 @@ export function toJsonValue(value: unknown) {
     }));
 }
 
-export function createMessageLogRecord(message: MessageLike, observedAt = new Date().toISOString()): MessageLogRecord | null {
+export function createMessageLogRecord(
+    message: MessageLike,
+    observedAt: string,
+    capture: MessageCaptureMetadata,
+): MessageLogRecord | null {
     if (!message?.id || message.state === "SENDING" || message.state === "SEND_FAILED") return null;
     let payload: unknown;
     try {
@@ -154,6 +164,7 @@ export function createMessageLogRecord(message: MessageLike, observedAt = new Da
         type: "message",
         messageId: message.id,
         observedAt,
+        ...capture,
         payload: payload as Record<string, unknown>,
     };
 }
@@ -286,7 +297,7 @@ export function validateHealthResult(result: SendResult) {
     if (!result.ok) return false;
     try {
         const body = JSON.parse(result.body);
-        return body?.ok === true && body.service === "vencord-channel-logger" && body.version === 1;
+        return body?.ok === true && body.service === "vencord-channel-logger" && body.version === 2;
     } catch {
         return false;
     }

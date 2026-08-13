@@ -64,13 +64,20 @@ function record(id: string, content = "message") {
                 timestamp: "2026-07-31T12:00:00.000Z",
             };
         }
-    }, "2026-07-31T13:00:00.000Z")!;
+    }, "2026-07-31T13:00:00.000Z", {
+        eventType: "cache",
+        payloadKind: "snapshot",
+        payloadSource: "message-store",
+    })!;
 }
 
 assert.deepEqual(record("100"), {
     type: "message",
     messageId: "100",
     observedAt: "2026-07-31T13:00:00.000Z",
+    eventType: "cache",
+    payloadKind: "snapshot",
+    payloadSource: "message-store",
     payload: {
         id: "100",
         channel_id: "10",
@@ -78,14 +85,45 @@ assert.deepEqual(record("100"), {
         timestamp: "2026-07-31T12:00:00.000Z",
     }
 });
-assert.equal(createMessageLogRecord({ id: "pending", channel_id: "10", state: "SENDING" }, "now"), null);
+assert.deepEqual(createMessageLogRecord({
+    id: "100",
+    channel_id: "10",
+    content: "edited",
+    edited_timestamp: "2026-07-31T13:00:00.000Z",
+}, "2026-07-31T13:00:01.000Z", {
+    eventType: "update",
+    payloadKind: "patch",
+    payloadSource: "flux-event",
+}), {
+    type: "message",
+    messageId: "100",
+    observedAt: "2026-07-31T13:00:01.000Z",
+    eventType: "update",
+    payloadKind: "patch",
+    payloadSource: "flux-event",
+    payload: {
+        id: "100",
+        channel_id: "10",
+        content: "edited",
+        edited_timestamp: "2026-07-31T13:00:00.000Z",
+    },
+});
+assert.equal(createMessageLogRecord(
+    { id: "pending", channel_id: "10", state: "SENDING" },
+    "now",
+    { eventType: "create", payloadKind: "snapshot", payloadSource: "flux-event" },
+), null);
 assert.equal(createMessageLogRecord({
     id: "broken",
     channel_id: "10",
     toJS() {
         throw new Error("broken record");
     }
-}, "2026-07-31T13:00:00.000Z"), null);
+}, "2026-07-31T13:00:00.000Z", {
+    eventType: "cache",
+    payloadKind: "snapshot",
+    payloadSource: "message-store",
+}), null);
 
 assert.equal(createApiUrl("http://127.0.0.1:49322", "/api/health"), "http://127.0.0.1:49322/api/health");
 assert.equal(createApiUrl("http://localhost:5000/", "/api/channels/10/status"), "http://localhost:5000/api/channels/10/status");
@@ -137,6 +175,7 @@ const remoteStatuses = [{
     guildName: "Guild",
     channelName: "general",
     messageCount: 20,
+    eventCount: 24,
     deletedCount: 1,
     oldestMessageAt: "2026-07-01T00:00:00.000Z",
     newestMessageAt: "2026-07-31T00:00:00.000Z",
@@ -146,6 +185,7 @@ const remoteStatuses = [{
     guildName: "Guild",
     channelName: "archive",
     messageCount: 10,
+    eventCount: 12,
     deletedCount: 0,
     oldestMessageAt: "2026-06-01T00:00:00.000Z",
     newestMessageAt: "2026-06-30T00:00:00.000Z",
@@ -165,7 +205,7 @@ assert.deepEqual(parseEnabledChannels("invalid"), []);
 assert.equal(validateHealthResult({
     ok: true,
     status: 200,
-    body: JSON.stringify({ ok: true, service: "vencord-channel-logger", version: 1 }),
+    body: JSON.stringify({ ok: true, service: "vencord-channel-logger", version: 2 }),
 }), true);
 assert.equal(validateHealthResult({ ok: true, status: 200, body: "ok" }), false);
 assert.deepEqual(validateLogResult({

@@ -6,11 +6,12 @@
 
 import { createServer, IncomingMessage, Server, ServerResponse } from "node:http";
 
-import { ChannelLogRecord, ChannelLogStore, ChannelMetadata, isCanonicalSnowflake, VersionCursor } from "./storage";
+import { ChannelLogRecord, ChannelLogStore, ChannelMetadata, EventCursor, isCanonicalSnowflake, VersionCursor } from "./storage";
+
+const API_PREFIX = "/api/v2";
 
 interface ServerOptions {
     store: ChannelLogStore;
-    maxBodyBytes?: number;
     downloadPageSize?: number;
     log?: (message: string) => void;
 }
@@ -35,23 +36,12 @@ function sendJson(response: ServerResponse, status: number, payload: unknown) {
     response.end(body);
 }
 
-async function readJsonBody(request: IncomingMessage, maxBodyBytes: number) {
+async function readJsonBody(request: IncomingMessage) {
     const chunks: Buffer[] = [];
-    let size = 0;
-    let tooLarge = false;
 
     for await (const chunk of request) {
         const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        size += buffer.length;
-        if (size > maxBodyBytes) {
-            tooLarge = true;
-            continue;
-        }
         chunks.push(buffer);
-    }
-
-    if (tooLarge) {
-        throw new HttpError(413, "request_too_large", `Request body exceeds ${maxBodyBytes} bytes`);
     }
 
     try {
@@ -63,6 +53,21 @@ async function readJsonBody(request: IncomingMessage, maxBodyBytes: number) {
 
 function isTimestamp(value: unknown): value is string {
     return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function hasValidCaptureMetadata(record: any) {
+    return ((record.eventType === "load" || record.eventType === "create")
+        && record.payloadKind === "snapshot"
+        && record.payloadSource === "flux-event")
+        || (record.eventType === "update"
+            && record.payloadKind === "patch"
+            && record.payloadSource === "flux-event")
+        || (record.eventType === "update"
+            && record.payloadKind === "snapshot"
+            && record.payloadSource === "message-store")
+        || (record.eventType === "cache"
+            && record.payloadKind === "snapshot"
+            && record.payloadSource === "message-store");
 }
 
 function validateRecords(channelId: string, body: unknown): ChannelLogRecord[] {
@@ -88,6 +93,9 @@ function validateRecords(channelId: string, body: unknown): ChannelLogRecord[] {
             };
         }
 
+        if (!hasValidCaptureMetadata(record)) {
+            throw new HttpError(400, "invalid_request", `records[${index}] has invalid capture metadata`);
+        }
         if (!record.payload || typeof record.payload !== "object" || Array.isArray(record.payload)) {
             throw new HttpError(400, "invalid_request", `records[${index}].payload must be an object`);
         }
@@ -100,6 +108,9 @@ function validateRecords(channelId: string, body: unknown): ChannelLogRecord[] {
             type: "message",
             messageId: record.messageId,
             observedAt: record.observedAt,
+            eventType: record.eventType,
+            payloadKind: record.payloadKind,
+            payloadSource: record.payloadSource,
             payload: record.payload,
         };
     });
@@ -169,13 +180,18 @@ async function streamDownload(
 
     await writeChunk(response, `{"export":${JSON.stringify({
         format: "vencord-channel-log",
-        version: 1,
+        version: 2,
         exportedAt,
         channelId,
         order: "newest-first",
-        payloadKind: "discord-client-message-record",
+        payloadKinds: {
+            messages: "latest-complete-snapshot",
+            messageVersions: "complete-snapshot-versions",
+            messageEvents: "captured-flux-events-and-client-snapshots",
+        },
         completeness: "visible-loaded-messages-only",
         messageCount: status.messageCount,
+        eventCount: status.eventCount,
         deletedCount: status.deletedCount,
         oldestMessageAt: status.oldestMessageAt,
         newestMessageAt: status.newestMessageAt,
@@ -202,12 +218,22 @@ async function streamDownload(
         }
         versionCursor = page.nextCursor;
     } while (versionCursor != null);
+    await writeChunk(response, `],"messageEvents":[`);
+    separator = "";
+    let eventCursor: EventCursor | null = null;
+    do {
+        const page = store.readEventPage(channelId, eventCursor, pageSize);
+        for (const event of page.items) {
+            await writeChunk(response, separator + JSON.stringify(event));
+            separator = ",";
+        }
+        eventCursor = page.nextCursor;
+    } while (eventCursor != null);
     response.end("]}");
 }
 
 export function createChannelLoggerServer({
     store,
-    maxBodyBytes = 1024 * 1024,
     downloadPageSize = 250,
     log = () => undefined,
 }: ServerOptions): Server {
@@ -218,15 +244,15 @@ export function createChannelLoggerServer({
 
         try {
             if (method === "GET" && url.pathname === "/api/health") {
-                sendJson(response, 200, { ok: true, service: "vencord-channel-logger", version: 1 });
+                sendJson(response, 200, { ok: true, service: "vencord-channel-logger", version: 2 });
                 return;
             }
-            if (method === "GET" && url.pathname === "/api/channels/status") {
+            if (method === "GET" && url.pathname === `${API_PREFIX}/channels/status`) {
                 sendJson(response, 200, { channels: store.listStatuses() });
                 return;
             }
 
-            const match = /^\/api\/channels\/(\d{1,32})\/(log|status|download)$/.exec(url.pathname);
+            const match = /^\/api\/v2\/channels\/(\d{1,32})\/(log|status|download)$/.exec(url.pathname);
             if (!match) throw new HttpError(404, "not_found", "Endpoint not found");
             const [, channelId, action] = match;
             if (!isCanonicalSnowflake(channelId)) {
@@ -241,7 +267,7 @@ export function createChannelLoggerServer({
                 if (contentType !== "application/json") {
                     throw new HttpError(415, "unsupported_media_type", "Content-Type must be application/json");
                 }
-                const body = await readJsonBody(request, maxBodyBytes);
+                const body = await readJsonBody(request);
                 const records = validateRecords(channelId, body);
                 const metadata = validateChannelMetadata(channelId, body);
                 const result = store.log(channelId, records, metadata);

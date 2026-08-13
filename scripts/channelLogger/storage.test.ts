@@ -26,8 +26,14 @@ async function main() {
     };
 
     assert.deepEqual(store.log("10", [
-        { type: "message", messageId: "100", observedAt: "2026-07-31T12:00:00.000Z", payload: firstPayload },
-        { type: "message", messageId: "100", observedAt: "2026-07-31T12:01:00.000Z", payload: firstPayload },
+        {
+            type: "message", messageId: "100", observedAt: "2026-07-31T12:00:00.000Z",
+            eventType: "load", payloadKind: "snapshot", payloadSource: "flux-event", payload: firstPayload,
+        },
+        {
+            type: "message", messageId: "100", observedAt: "2026-07-31T12:01:00.000Z",
+            eventType: "load", payloadKind: "snapshot", payloadSource: "flux-event", payload: firstPayload,
+        },
         { type: "delete", messageId: "missing", observedAt: "2026-07-31T12:01:30.000Z" },
     ], {
         guildId: "1",
@@ -47,12 +53,18 @@ async function main() {
             type: "message",
             messageId: "100",
             observedAt: "2026-07-31T12:02:00.000Z",
+            eventType: "update",
+            payloadKind: "snapshot",
+            payloadSource: "message-store",
             payload: { ...firstPayload, content: "edited" }
         },
         {
             type: "message",
             messageId: "101",
             observedAt: "2026-07-31T12:03:00.000Z",
+            eventType: "create",
+            payloadKind: "snapshot",
+            payloadSource: "flux-event",
             payload: {
                 id: "101",
                 channel_id: "10",
@@ -82,6 +94,7 @@ async function main() {
         channelName: "general",
         messageCount: 2,
         versionCount: 3,
+        eventCount: 3,
         deletedCount: 1,
         duplicateCount: 1,
         oldestMessageAt: "2026-07-31T12:00:00.000Z",
@@ -138,6 +151,9 @@ async function main() {
         type: "message",
         messageId: "200",
         observedAt: "2026-07-31T10:00:00.000Z",
+        eventType: "load",
+        payloadKind: "snapshot",
+        payloadSource: "flux-event",
         payload: originalPayload,
     }], dedupMetadata).inserted, 1);
 
@@ -152,6 +168,9 @@ async function main() {
         type: "message",
         messageId: "200",
         observedAt: "2026-07-31T10:01:00.000Z",
+        eventType: "load",
+        payloadKind: "snapshot",
+        payloadSource: "flux-event",
         payload: reorderedPayload,
     }], dedupMetadata), {
         received: 1,
@@ -166,12 +185,18 @@ async function main() {
         type: "message",
         messageId: "200",
         observedAt: "2026-07-31T10:02:00.000Z",
+        eventType: "update",
+        payloadKind: "snapshot",
+        payloadSource: "message-store",
         payload: { ...originalPayload, content: "edited" },
     }], dedupMetadata).updated, 1);
     assert.deepEqual(store.log("20", [{
         type: "message",
         messageId: "200",
         observedAt: "2026-07-31T10:03:00.000Z",
+        eventType: "update",
+        payloadKind: "snapshot",
+        payloadSource: "message-store",
         payload: originalPayload,
     }], dedupMetadata), {
         received: 1,
@@ -200,11 +225,123 @@ async function main() {
         type: "message",
         messageId: "200",
         observedAt: "2026-07-31T10:07:00.000Z",
+        eventType: "cache",
+        payloadKind: "snapshot",
+        payloadSource: "message-store",
         payload: originalPayload,
     }], dedupMetadata);
     const reloadedDeletedMessage = Array.from(store.exportMessages("20"))[0];
     assert.equal(reloadedDeletedMessage.logger.deletedAt, "2026-07-31T10:04:00.000Z");
     assert.equal(reloadedDeletedMessage.payload.content, "original");
+
+    const eventMetadata = {
+        guildId: "3",
+        guildName: "Event Guild",
+        channelName: "events",
+    };
+    const eventOriginal = {
+        id: "300",
+        channel_id: "30",
+        content: "original",
+        author: { id: "301", username: "author" },
+        timestamp: "2026-07-31T11:00:00.000Z",
+    };
+    store.log("30", [{
+        type: "message",
+        messageId: "300",
+        observedAt: "2026-07-31T11:00:00.000Z",
+        eventType: "load",
+        payloadKind: "snapshot",
+        payloadSource: "flux-event",
+        payload: eventOriginal,
+    }], eventMetadata);
+    const rawUpdatePatch = {
+        id: "300",
+        channel_id: "30",
+        content: "edited",
+        edited_timestamp: "2026-07-31T11:01:00.000Z",
+    };
+    store.log("30", [{
+        type: "message",
+        messageId: "300",
+        observedAt: "2026-07-31T11:01:00.000Z",
+        eventType: "update",
+        payloadKind: "patch",
+        payloadSource: "flux-event",
+        payload: rawUpdatePatch,
+    }], eventMetadata);
+    assert.equal(Array.from(store.exportMessages("30"))[0].payload.content, "original");
+    assert.equal(store.status("30").versionCount, 1);
+
+    const clientSnapshot = { ...eventOriginal, content: "edited", editedTimestamp: "2026-07-31T11:01:00.000Z" };
+    store.log("30", [{
+        type: "message",
+        messageId: "300",
+        observedAt: "2026-07-31T11:01:01.000Z",
+        eventType: "update",
+        payloadKind: "snapshot",
+        payloadSource: "message-store",
+        payload: clientSnapshot,
+    }], eventMetadata);
+    store.log("30", [{
+        type: "message",
+        messageId: "300",
+        observedAt: "2026-07-31T11:02:00.000Z",
+        eventType: "update",
+        payloadKind: "patch",
+        payloadSource: "flux-event",
+        payload: rawUpdatePatch,
+    }], eventMetadata);
+    assert.equal(Array.from(store.exportMessages("30"))[0].payload.content, "edited");
+    assert.equal(store.status("30").versionCount, 2);
+    assert.deepEqual(Array.from((store as any).exportEvents("30")).map((event: any) => ({
+        eventType: event.eventType,
+        payloadKind: event.payloadKind,
+        payloadSource: event.payloadSource,
+        content: event.payload.content,
+        hasAuthor: event.payload.author != null,
+    })), [{
+        eventType: "update",
+        payloadKind: "patch",
+        payloadSource: "flux-event",
+        content: "edited",
+        hasAuthor: false,
+    }, {
+        eventType: "update",
+        payloadKind: "snapshot",
+        payloadSource: "message-store",
+        content: "edited",
+        hasAuthor: true,
+    }, {
+        eventType: "update",
+        payloadKind: "patch",
+        payloadSource: "flux-event",
+        content: "edited",
+        hasAuthor: false,
+    }, {
+        eventType: "load",
+        payloadKind: "snapshot",
+        payloadSource: "flux-event",
+        content: "original",
+        hasAuthor: true,
+    }]);
+
+    store.log("40", [{
+        type: "message",
+        messageId: "400",
+        observedAt: "2026-07-31T12:00:00.000Z",
+        eventType: "update",
+        payloadKind: "patch",
+        payloadSource: "flux-event",
+        payload: { id: "400", channel_id: "40", content: "patch only" },
+    }], {
+        guildId: "4",
+        guildName: "Patch Guild",
+        channelName: "patch-only",
+    });
+    assert.equal((store.status("40") as any).eventCount, 1);
+    assert.equal(store.status("40").messageCount, 0);
+    assert(store.listStatuses().some(status => status.channelId === "40"));
 
     store.close();
 

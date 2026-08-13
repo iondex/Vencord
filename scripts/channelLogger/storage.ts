@@ -13,6 +13,9 @@ export interface MessageLogRecord {
     type: "message";
     messageId: string;
     observedAt: string;
+    eventType: "load" | "create" | "update" | "cache";
+    payloadKind: "snapshot" | "patch";
+    payloadSource: "flux-event" | "message-store";
     payload: Record<string, unknown>;
 }
 
@@ -46,6 +49,7 @@ export interface ChannelStatus {
     channelName: string | null;
     messageCount: number;
     versionCount: number;
+    eventCount: number;
     deletedCount: number;
     duplicateCount: number;
     oldestMessageAt: string | null;
@@ -67,6 +71,7 @@ interface StatusRow {
     channel_name: string | null;
     message_count: number;
     version_count: number;
+    event_count: number;
     deleted_count: number;
     duplicate_count: number;
     oldest_message_at: string | null;
@@ -79,6 +84,7 @@ interface StatusRow {
 interface ExportRow {
     message_id: string;
     payload_json: string;
+    payload_source: MessageLogRecord["payloadSource"];
     first_seen_at: string;
     last_seen_at: string;
     deleted_at: string | null;
@@ -90,6 +96,17 @@ interface ExportVersionRow {
     observed_at: string;
     payload_hash: string;
     payload_json: string;
+    payload_source: MessageLogRecord["payloadSource"];
+}
+
+interface ExportEventRow {
+    message_id: string;
+    event_type: MessageLogRecord["eventType"];
+    payload_kind: MessageLogRecord["payloadKind"];
+    payload_source: MessageLogRecord["payloadSource"];
+    observed_at: string;
+    event_hash: string;
+    payload_json: string;
 }
 
 export interface VersionCursor {
@@ -98,7 +115,13 @@ export interface VersionCursor {
     payloadHash: string;
 }
 
-const SCHEMA_VERSION = 1;
+export interface EventCursor {
+    messageId: string;
+    observedAt: string;
+    eventHash: string;
+}
+
+const SCHEMA_VERSION = 2;
 const SQLITE_INT64_MAX = 9223372036854775807n;
 
 export function isCanonicalSnowflake(value: unknown): value is string {
@@ -130,6 +153,7 @@ function emptyStatus(channelId: string): ChannelStatus {
         channelName: null,
         messageCount: 0,
         versionCount: 0,
+        eventCount: 0,
         deletedCount: 0,
         duplicateCount: 0,
         oldestMessageAt: null,
@@ -184,6 +208,7 @@ export class ChannelLogStore {
                 message_id TEXT NOT NULL,
                 payload_json TEXT NOT NULL,
                 payload_hash TEXT NOT NULL,
+                payload_source TEXT NOT NULL,
                 first_seen_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
                 deleted_at TEXT,
@@ -195,11 +220,24 @@ export class ChannelLogStore {
                 message_id TEXT NOT NULL,
                 payload_hash TEXT NOT NULL,
                 payload_json TEXT NOT NULL,
+                payload_source TEXT NOT NULL,
                 observed_at TEXT NOT NULL,
                 PRIMARY KEY (channel_id, message_id, payload_hash),
                 FOREIGN KEY (channel_id, message_id)
                     REFERENCES messages (channel_id, message_id)
                     ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS message_events (
+                channel_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload_kind TEXT NOT NULL,
+                payload_source TEXT NOT NULL,
+                event_hash TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                PRIMARY KEY (channel_id, message_id, event_hash)
             );
 
             CREATE TABLE IF NOT EXISTS channel_stats (
@@ -209,6 +247,7 @@ export class ChannelLogStore {
                 channel_name TEXT NOT NULL,
                 message_count INTEGER NOT NULL DEFAULT 0,
                 version_count INTEGER NOT NULL DEFAULT 0,
+                event_count INTEGER NOT NULL DEFAULT 0,
                 deleted_count INTEGER NOT NULL DEFAULT 0,
                 duplicate_count INTEGER NOT NULL DEFAULT 0,
                 oldest_message_at TEXT,
@@ -232,6 +271,7 @@ export class ChannelLogStore {
             ignoredDeletes: 0,
         };
         let versionsAdded = 0;
+        let eventsAdded = 0;
         if (records.length === 0) return result;
 
         const findMessage = this.database.prepare(`
@@ -241,12 +281,12 @@ export class ChannelLogStore {
         `);
         const insertMessage = this.database.prepare(`
             INSERT INTO messages (
-                channel_id, message_id, payload_json, payload_hash, first_seen_at, last_seen_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                channel_id, message_id, payload_json, payload_hash, payload_source, first_seen_at, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
         `);
         const updateMessage = this.database.prepare(`
             UPDATE messages
-            SET payload_json = ?, payload_hash = ?, last_seen_at = ?
+            SET payload_json = ?, payload_hash = ?, payload_source = ?, last_seen_at = ?
             WHERE channel_id = ? AND message_id = ?
         `);
         const updateLastSeen = this.database.prepare(`
@@ -256,8 +296,14 @@ export class ChannelLogStore {
         `);
         const insertVersion = this.database.prepare(`
             INSERT OR IGNORE INTO message_versions (
-                channel_id, message_id, payload_hash, payload_json, observed_at
-            ) VALUES (?, ?, ?, ?, ?)
+                channel_id, message_id, payload_hash, payload_json, payload_source, observed_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const insertEvent = this.database.prepare(`
+            INSERT OR IGNORE INTO message_events (
+                channel_id, message_id, event_type, payload_kind, payload_source,
+                event_hash, payload_json, observed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const markDeleted = this.database.prepare(`
             UPDATE messages
@@ -283,28 +329,64 @@ export class ChannelLogStore {
 
                 const payloadJson = JSON.stringify(record.payload);
                 const hash = payloadHash(record.payload);
+                const eventHash = payloadHash({
+                    eventType: record.eventType,
+                    payloadKind: record.payloadKind,
+                    payloadSource: record.payloadSource,
+                    eventOccurrence: record.eventType === "update" ? record.observedAt : null,
+                    payload: record.payload,
+                });
+                const eventResult = insertEvent.run(
+                    channelId,
+                    record.messageId,
+                    record.eventType,
+                    record.payloadKind,
+                    record.payloadSource,
+                    eventHash,
+                    payloadJson,
+                    record.observedAt
+                );
+                eventsAdded += Number(eventResult.changes);
+                if (record.payloadKind === "patch") continue;
+
                 if (!existing) {
                     insertMessage.run(
                         channelId,
                         record.messageId,
                         payloadJson,
                         hash,
+                        record.payloadSource,
                         record.observedAt,
                         record.observedAt
                     );
-                    insertVersion.run(channelId, record.messageId, hash, payloadJson, record.observedAt);
+                    insertVersion.run(
+                        channelId,
+                        record.messageId,
+                        hash,
+                        payloadJson,
+                        record.payloadSource,
+                        record.observedAt
+                    );
                     versionsAdded++;
                     result.inserted++;
                 } else if (existing.payload_hash === hash) {
                     updateLastSeen.run(record.observedAt, channelId, record.messageId);
                     result.duplicates++;
                 } else {
-                    updateMessage.run(payloadJson, hash, record.observedAt, channelId, record.messageId);
+                    updateMessage.run(
+                        payloadJson,
+                        hash,
+                        record.payloadSource,
+                        record.observedAt,
+                        channelId,
+                        record.messageId
+                    );
                     const versionResult = insertVersion.run(
                         channelId,
                         record.messageId,
                         hash,
                         payloadJson,
+                        record.payloadSource,
                         record.observedAt
                     );
                     result.updated++;
@@ -317,7 +399,7 @@ export class ChannelLogStore {
             const lastObservedAt = observedTimes.at(-1)!;
             const lastWriteAt = this.now();
             const messageTimes = records
-                .filter((record): record is MessageLogRecord => record.type === "message")
+                .filter((record): record is MessageLogRecord => record.type === "message" && record.payloadKind === "snapshot")
                 .map(record => messageTimestamp(record.payload, record.messageId))
                 .filter((value): value is string => value != null)
                 .sort();
@@ -326,16 +408,17 @@ export class ChannelLogStore {
             this.database.prepare(`
                 INSERT INTO channel_stats (
                     channel_id, guild_id, guild_name, channel_name,
-                    message_count, version_count, deleted_count, duplicate_count,
+                    message_count, version_count, event_count, deleted_count, duplicate_count,
                     oldest_message_at, newest_message_at,
                     first_observed_at, last_observed_at, last_write_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(channel_id) DO UPDATE SET
                     guild_id = excluded.guild_id,
                     guild_name = excluded.guild_name,
                     channel_name = excluded.channel_name,
                     message_count = message_count + excluded.message_count,
                     version_count = version_count + excluded.version_count,
+                    event_count = event_count + excluded.event_count,
                     deleted_count = deleted_count + excluded.deleted_count,
                     duplicate_count = duplicate_count + excluded.duplicate_count,
                     oldest_message_at = CASE
@@ -358,6 +441,7 @@ export class ChannelLogStore {
                 metadata.channelName,
                 result.inserted,
                 versionsAdded,
+                eventsAdded,
                 result.deleted,
                 result.duplicates,
                 oldestMessageAt,
@@ -382,6 +466,7 @@ export class ChannelLogStore {
                 channel_name,
                 message_count,
                 version_count,
+                event_count,
                 deleted_count,
                 duplicate_count,
                 oldest_message_at,
@@ -401,6 +486,7 @@ export class ChannelLogStore {
             channelName: row.channel_name,
             messageCount: row.message_count,
             versionCount: row.version_count,
+            eventCount: row.event_count,
             deletedCount: row.deleted_count,
             duplicateCount: row.duplicate_count,
             oldestMessageAt: row.oldest_message_at,
@@ -420,6 +506,7 @@ export class ChannelLogStore {
                 channel_name,
                 message_count,
                 version_count,
+                event_count,
                 deleted_count,
                 duplicate_count,
                 oldest_message_at,
@@ -428,7 +515,7 @@ export class ChannelLogStore {
                 last_observed_at,
                 last_write_at
             FROM channel_stats
-            WHERE message_count > 0
+            WHERE message_count > 0 OR event_count > 0
             ORDER BY newest_message_at DESC, channel_id DESC
         `).all() as unknown as StatusRow[];
 
@@ -439,6 +526,7 @@ export class ChannelLogStore {
             channelName: row.channel_name,
             messageCount: row.message_count,
             versionCount: row.version_count,
+            eventCount: row.event_count,
             deletedCount: row.deleted_count,
             duplicateCount: row.duplicate_count,
             oldestMessageAt: row.oldest_message_at,
@@ -458,6 +546,7 @@ export class ChannelLogStore {
             SELECT
                 messages.message_id,
                 messages.payload_json,
+                messages.payload_source,
                 messages.first_seen_at,
                 messages.last_seen_at,
                 messages.deleted_at,
@@ -479,6 +568,7 @@ export class ChannelLogStore {
         return {
             items: pageRows.map(row => ({
                 payload: JSON.parse(row.payload_json),
+                payloadSource: row.payload_source,
                 logger: {
                     firstSeenAt: row.first_seen_at,
                     lastSeenAt: row.last_seen_at,
@@ -500,7 +590,7 @@ export class ChannelLogStore {
                 OR (message_id = ? AND observed_at = ? AND payload_hash < ?)
             )`;
         const statement = this.database.prepare(`
-            SELECT message_id, observed_at, payload_hash, payload_json
+            SELECT message_id, observed_at, payload_hash, payload_json, payload_source
             FROM message_versions
             WHERE channel_id = ?
             ${cursorClause}
@@ -528,6 +618,7 @@ export class ChannelLogStore {
             items: pageRows.map(row => ({
                 messageId: row.message_id,
                 observedAt: row.observed_at,
+                payloadSource: row.payload_source,
                 payload: JSON.parse(row.payload_json),
             })),
             nextCursor: hasMore && last
@@ -535,6 +626,60 @@ export class ChannelLogStore {
                     messageId: last.message_id,
                     observedAt: last.observed_at,
                     payloadHash: last.payload_hash,
+                }
+                : null,
+        };
+    }
+
+    readEventPage(channelId: string, cursor: EventCursor | null, limit = 250) {
+        const pageSize = Math.max(1, Math.min(1000, Math.trunc(limit)));
+        const cursorClause = cursor == null
+            ? ""
+            : `AND (
+                CAST(message_id AS INTEGER) < CAST(? AS INTEGER)
+                OR (message_id = ? AND observed_at < ?)
+                OR (message_id = ? AND observed_at = ? AND event_hash < ?)
+            )`;
+        const statement = this.database.prepare(`
+            SELECT
+                message_id, event_type, payload_kind, payload_source,
+                observed_at, event_hash, payload_json
+            FROM message_events
+            WHERE channel_id = ?
+            ${cursorClause}
+            ORDER BY CAST(message_id AS INTEGER) DESC, observed_at DESC, event_hash DESC
+            LIMIT ?
+        `);
+        const rows = (cursor == null
+            ? statement.all(channelId, pageSize + 1)
+            : statement.all(
+                channelId,
+                cursor.messageId,
+                cursor.messageId,
+                cursor.observedAt,
+                cursor.messageId,
+                cursor.observedAt,
+                cursor.eventHash,
+                pageSize + 1
+            )) as unknown as ExportEventRow[];
+        const hasMore = rows.length > pageSize;
+        const pageRows = rows.slice(0, pageSize);
+        const last = pageRows.at(-1);
+
+        return {
+            items: pageRows.map(row => ({
+                messageId: row.message_id,
+                eventType: row.event_type,
+                payloadKind: row.payload_kind,
+                payloadSource: row.payload_source,
+                observedAt: row.observed_at,
+                payload: JSON.parse(row.payload_json),
+            })),
+            nextCursor: hasMore && last
+                ? {
+                    messageId: last.message_id,
+                    observedAt: last.observed_at,
+                    eventHash: last.event_hash,
                 }
                 : null,
         };
@@ -553,6 +698,15 @@ export class ChannelLogStore {
         let cursor: VersionCursor | null = null;
         do {
             const page = this.readVersionPage(channelId, cursor);
+            yield* page.items;
+            cursor = page.nextCursor;
+        } while (cursor != null);
+    }
+
+    *exportEvents(channelId: string) {
+        let cursor: EventCursor | null = null;
+        do {
+            const page = this.readEventPage(channelId, cursor);
             yield* page.items;
             cursor = page.nextCursor;
         } while (cursor != null);

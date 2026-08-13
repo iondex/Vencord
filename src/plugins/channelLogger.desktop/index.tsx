@@ -37,6 +37,8 @@ import {
     createMessageLogRecord,
     EnabledChannelLogger,
     isSupportedGuildChannel,
+    LOGGER_API_PREFIX,
+    MessageCaptureMetadata,
     parseEnabledChannels,
     RemoteChannelStatusLike,
     serializeEnabledChannels,
@@ -71,7 +73,7 @@ const settings = definePluginSettings({
 });
 
 const queue = new ChannelBatchQueue(async (channelId, records) => {
-    const url = createApiUrl(settings.store.serverUrl.trim(), `/api/channels/${channelId}/log`);
+    const url = createApiUrl(settings.store.serverUrl.trim(), `${LOGGER_API_PREFIX}/channels/${channelId}/log`);
     if (!url) return { ok: false, status: -1, body: "Logger URL must be loopback HTTP" };
 
     const saved = getEnabledChannels().find(channel => channel.channelId === channelId)
@@ -130,6 +132,7 @@ interface RemoteChannelStatus extends RemoteChannelStatusLike {
     channelName: string | null;
     messageCount: number;
     versionCount: number;
+    eventCount: number;
     deletedCount: number;
     duplicateCount: number;
     oldestMessageAt: string | null;
@@ -143,26 +146,36 @@ function canLogChannel(channelId: string) {
     return enabledChannelIds.has(channelId) && isSupportedGuildChannel(ChannelStore.getChannel(channelId));
 }
 
-function enqueueMessages(channelId: string, messages: any[]) {
+function enqueueMessages(channelId: string, messages: any[], capture: MessageCaptureMetadata) {
     if (!canLogChannel(channelId)) return;
     const observedAt = new Date().toISOString();
 
     for (const message of messages) {
         const messageChannelId = message?.channel_id ?? message?.channelId;
         if (String(messageChannelId) !== channelId) continue;
-        const record = createMessageLogRecord(message, observedAt);
+        const record = createMessageLogRecord(message, observedAt, capture);
         if (record) queue.enqueue(channelId, record);
     }
 }
 
 function handleHistory(event: HistoryEvent) {
-    if (Array.isArray(event.messages)) enqueueMessages(event.channelId, event.messages);
+    if (Array.isArray(event.messages)) {
+        enqueueMessages(event.channelId, event.messages, {
+            eventType: "load",
+            payloadKind: "snapshot",
+            payloadSource: "flux-event",
+        });
+    }
 }
 
 function handleMessageCreate(event: MessageEvent) {
     const channelId = event.channelId ?? event.message?.channel_id ?? event.message?.channelId;
     if (event.optimistic || typeof channelId !== "string" || !event.message) return;
-    enqueueMessages(channelId, [event.message]);
+    enqueueMessages(channelId, [event.message], {
+        eventType: "create",
+        payloadKind: "snapshot",
+        payloadSource: "flux-event",
+    });
 }
 
 function handleMessageUpdate(event: MessageEvent) {
@@ -170,10 +183,22 @@ function handleMessageUpdate(event: MessageEvent) {
     const messageId = event.message?.id;
     if (typeof channelId !== "string" || typeof messageId !== "string" || !canLogChannel(channelId)) return;
 
+    enqueueMessages(channelId, [event.message], {
+        eventType: "update",
+        payloadKind: "patch",
+        payloadSource: "flux-event",
+    });
+
     setTimeout(() => {
         if (!canLogChannel(channelId)) return;
         const completeMessage = MessageStore.getMessage(channelId, messageId);
-        if (completeMessage) enqueueMessages(channelId, [completeMessage]);
+        if (completeMessage) {
+            enqueueMessages(channelId, [completeMessage], {
+                eventType: "update",
+                payloadKind: "snapshot",
+                payloadSource: "message-store",
+            });
+        }
     }, 0);
 }
 
@@ -208,7 +233,11 @@ function enableChannelLogger(channel: Channel) {
         channelName: channel.name || channel.id,
         guildName: guild.name,
     }]);
-    enqueueMessages(channel.id, collectCachedMessages(MessageStore.getMessages(channel.id)));
+    enqueueMessages(channel.id, collectCachedMessages(MessageStore.getMessages(channel.id)), {
+        eventType: "cache",
+        payloadKind: "snapshot",
+        payloadSource: "message-store",
+    });
     showToast(`已开启 ${guild.name} / #${channel.name} 的可见消息 logger`, Toasts.Type.SUCCESS);
 }
 
@@ -292,7 +321,7 @@ function LoggerSettings() {
             return;
         }
 
-        const statusUrl = createApiUrl(pluginSettings.serverUrl.trim(), "/api/channels/status")!;
+        const statusUrl = createApiUrl(pluginSettings.serverUrl.trim(), `${LOGGER_API_PREFIX}/channels/status`)!;
         const statusResult = await Native.get(statusUrl);
         if (!statusResult.ok) {
             const message = `读取频道状态失败 (${statusResult.status}): ${statusResult.body}`;
@@ -318,7 +347,7 @@ function LoggerSettings() {
     }
 
     function download(channelId: string) {
-        const url = createApiUrl(pluginSettings.serverUrl.trim(), `/api/channels/${channelId}/download`);
+        const url = createApiUrl(pluginSettings.serverUrl.trim(), `${LOGGER_API_PREFIX}/channels/${channelId}/download`);
         if (!url) {
             showToast("Channel logger 服务地址无效", Toasts.Type.FAILURE);
             return;
@@ -378,7 +407,7 @@ function LoggerSettings() {
                                 </Forms.FormText>
                                 {remote && (
                                     <Forms.FormText style={{ color: "var(--text-muted)", overflowWrap: "anywhere" }}>
-                                        已保存 {remote.messageCount} 条 · 已标记删除 {remote.deletedCount} 条
+                                        已保存 {remote.messageCount} 条 · 捕获事件 {remote.eventCount} 条 · 已标记删除 {remote.deletedCount} 条
                                         {` · 消息时间 ${formatMessageTime(remote.oldestMessageAt)} - ${formatMessageTime(remote.newestMessageAt)}`}
                                     </Forms.FormText>
                                 )}
