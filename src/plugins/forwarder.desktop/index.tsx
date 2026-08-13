@@ -17,6 +17,8 @@ import { Button, ChannelStore, Forms, GuildStore, showToast, Toasts, UserStore, 
 import { createForwarderStats, createHealthUrl, getForwardSkipReason } from "./logic";
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:49321/forward";
+const DEFAULT_FALLBACK_URL = "https://forwarder.yufeng.run/forward";
+const DEFAULT_DINGTALK_WEBHOOK_URL = "https://oapi.dingtalk.com/robot/send?access_token=e0fe70990df43fd76e3a6ed34facbdc91fe8db1dfbd152514d4f65cd86b43dd6";
 
 const logger = new Logger("forwarder");
 const Native = VencordNative.pluginHelpers.forwarder as PluginNative<typeof import("./native")>;
@@ -28,6 +30,23 @@ const settings = definePluginSettings({
         type: OptionType.STRING,
         description: "HTTP endpoint to forward notification messages to",
         default: DEFAULT_SERVER_URL,
+    },
+    fallbackUrl: {
+        type: OptionType.STRING,
+        description: "Fallback HTTP endpoint used after all primary attempts fail; leave empty to disable",
+        default: DEFAULT_FALLBACK_URL,
+    },
+    enableDingTalkAlerts: {
+        type: OptionType.BOOLEAN,
+        description: "Send one DingTalk alert after both primary and fallback delivery fail",
+        default: true,
+    },
+    dingTalkWebhookUrl: {
+        type: OptionType.STRING,
+        description: "DingTalk robot webhook used for final failure alerts",
+        default: DEFAULT_DINGTALK_WEBHOOK_URL,
+        componentProps: { type: "password" },
+        disabled() { return !this.store.enableDingTalkAlerts; },
     },
     logFailures: {
         type: OptionType.BOOLEAN,
@@ -226,45 +245,28 @@ function createPayload(message: ForwarderMessage) {
 
 async function forwardMessage(message: ForwarderMessage) {
     const serverUrl = settings.store.serverUrl.trim();
-    if (!serverUrl) return;
 
-    const result = await Native.send(serverUrl, createPayload(message));
+    const result = await Native.send({
+        primaryUrl: serverUrl,
+        fallbackUrl: settings.store.fallbackUrl.trim(),
+        payload: createPayload(message),
+        context: {
+            messageId: message.id,
+            channelId: message.channel_id,
+            guildId: message.guild_id,
+        },
+        dingTalk: {
+            enabled: settings.store.enableDingTalkAlerts,
+            webhookUrl: settings.store.dingTalkWebhookUrl.trim(),
+        },
+    });
     stats.recordForwardAttempt(result.ok);
     if (!result.ok && settings.store.logFailures) {
-        logger.error(`Failed to forward notification (${result.status})`, result.body);
+        logger.error(`Failed to forward notification (${result.status})`, result.errorSummary ?? result.body, result.attempts);
     }
 }
 
-async function sendTestPayload() {
-    const serverUrl = settings.store.serverUrl.trim();
-    if (!serverUrl) return;
-
-    const result = await Native.send(serverUrl, sanitizeForJson({
-        source: {
-            plugin: "forwarder",
-            client: "Vencord",
-            kind: "test"
-        },
-        forwardedAt: new Date().toISOString(),
-        notification: {
-            title: "forwarder test",
-            body: "Test payload from Vencord forwarder"
-        },
-        metadata: {
-            currentUser: compactUser(UserStore.getCurrentUser())
-        },
-        message: null
-    }));
-
-    if (!result.ok && settings.store.logFailures) {
-        logger.error(`Failed to forward test payload (${result.status})`, result.body);
-    }
-
-    return result;
-}
-
-async function checkHealth() {
-    const serverUrl = settings.store.serverUrl.trim();
+async function checkHealth(serverUrl: string) {
     if (!serverUrl) {
         return { ok: false, status: -1, body: "Server URL is empty" };
     }
@@ -285,66 +287,96 @@ function StatsLine({ label, value }: { label: string; value: number; }) {
     );
 }
 
-function ForwarderSettings() {
-    const [health, setHealth] = useState<HealthCheckState>({
-        status: "idle",
-        message: "Health check has not run yet."
-    });
-    const [statsSnapshot, setStatsSnapshot] = useState(stats.snapshot());
-    const [isSendingTest, setIsSendingTest] = useState(false);
-
-    const refreshStats = () => setStatsSnapshot(stats.snapshot());
-
-    async function handleHealthCheck() {
-        setHealth({ status: "checking", message: "Checking signal-hub..." });
-        const result = await checkHealth();
-
-        if (result.ok) {
-            setHealth({ status: "ok", message: `Healthy (${result.status})` });
-            showToast("signal-hub is healthy", Toasts.Type.SUCCESS);
-        } else {
-            const message = `Health check failed (${result.status}): ${result.body}`;
-            setHealth({ status: "error", message });
-            showToast(message, Toasts.Type.FAILURE);
-        }
-    }
-
-    async function handleSendTest() {
-        setIsSendingTest(true);
-        const result = await sendTestPayload();
-        setIsSendingTest(false);
-
-        if (!result) return;
-        if (result.ok) {
-            showToast("Test payload sent", Toasts.Type.SUCCESS);
-        } else {
-            showToast(`Test payload failed (${result.status})`, Toasts.Type.FAILURE);
-        }
-    }
-
-    const healthColor = health.status === "ok"
+function HealthLine({ label, health }: { label: string; health: HealthCheckState; }) {
+    const color = health.status === "ok"
         ? "var(--text-positive)"
         : health.status === "error"
             ? "var(--text-danger)"
             : "var(--text-muted)";
 
     return (
+        <Forms.FormText style={{ color }}>
+            <strong>{label}:</strong> {health.message}
+        </Forms.FormText>
+    );
+}
+
+function ForwarderSettings() {
+    const [primaryHealth, setPrimaryHealth] = useState<HealthCheckState>({
+        status: "idle",
+        message: "Health check has not run yet."
+    });
+    const fallbackUrl = settings.use(["fallbackUrl"]).fallbackUrl.trim();
+    const [fallbackHealth, setFallbackHealth] = useState<HealthCheckState>({
+        status: fallbackUrl ? "idle" : "error",
+        message: fallbackUrl ? "Health check has not run yet." : "Not configured"
+    });
+    const [statsSnapshot, setStatsSnapshot] = useState(stats.snapshot());
+    const displayedFallbackHealth: HealthCheckState = !fallbackUrl
+        ? { status: "error", message: "Not configured" }
+        : fallbackHealth.message === "Not configured"
+            ? { status: "idle", message: "Health check has not run yet." }
+            : fallbackHealth;
+
+    const refreshStats = () => setStatsSnapshot(stats.snapshot());
+    const clearStats = () => {
+        stats.reset();
+        refreshStats();
+    };
+
+    async function handlePrimaryHealthCheck() {
+        setPrimaryHealth({ status: "checking", message: "Checking primary endpoint..." });
+        const result = await checkHealth(settings.store.serverUrl.trim());
+        const duration = result.durationMs === undefined ? "" : ` in ${result.durationMs}ms`;
+
+        if (result.ok) {
+            setPrimaryHealth({ status: "ok", message: `Healthy (${result.status})${duration}: ${result.body}` });
+            showToast("Primary forwarder endpoint is healthy", Toasts.Type.SUCCESS);
+        } else {
+            const message = `Health check failed (${result.status})${duration}: ${result.body}`;
+            setPrimaryHealth({ status: "error", message });
+            showToast(message, Toasts.Type.FAILURE);
+        }
+    }
+
+    async function handleFallbackHealthCheck() {
+        if (!fallbackUrl) {
+            setFallbackHealth({ status: "error", message: "Not configured" });
+            return;
+        }
+
+        setFallbackHealth({ status: "checking", message: "Checking fallback endpoint..." });
+        const result = await checkHealth(fallbackUrl);
+        const duration = result.durationMs === undefined ? "" : ` in ${result.durationMs}ms`;
+        if (result.ok) {
+            setFallbackHealth({ status: "ok", message: `Healthy (${result.status})${duration}: ${result.body}` });
+            showToast("Fallback forwarder endpoint is healthy", Toasts.Type.SUCCESS);
+        } else {
+            const message = `Health check failed (${result.status})${duration}: ${result.body}`;
+            setFallbackHealth({ status: "error", message });
+            showToast(message, Toasts.Type.FAILURE);
+        }
+    }
+
+    return (
         <Flex flexDirection="column" gap="12px">
             <Flex gap="8px" flexWrap="wrap">
-                <Button onClick={() => void handleHealthCheck()} disabled={health.status === "checking"}>
-                    {health.status === "checking" ? "Checking..." : "Health check"}
+                <Button onClick={() => void handlePrimaryHealthCheck()} disabled={primaryHealth.status === "checking"}>
+                    {primaryHealth.status === "checking" ? "Checking primary..." : "Check primary health"}
                 </Button>
-                <Button onClick={() => void handleSendTest()} disabled={isSendingTest}>
-                    {isSendingTest ? "Sending..." : "Send test payload"}
+                <Button onClick={() => void handleFallbackHealthCheck()} disabled={!fallbackUrl || fallbackHealth.status === "checking"}>
+                    {fallbackHealth.status === "checking" ? "Checking fallback..." : "Check fallback health"}
                 </Button>
                 <Button color={Button.Colors.PRIMARY} onClick={refreshStats}>
                     Refresh stats
                 </Button>
+                <Button onClick={clearStats}>
+                    Clear stats
+                </Button>
             </Flex>
 
-            <Forms.FormText style={{ color: healthColor }}>
-                {health.message}
-            </Forms.FormText>
+            <HealthLine label="Primary" health={primaryHealth} />
+            <HealthLine label="Fallback" health={displayedFallbackHealth} />
 
             <div className={Margins.top8}>
                 <Forms.FormTitle tag="h3">Runtime stats</Forms.FormTitle>

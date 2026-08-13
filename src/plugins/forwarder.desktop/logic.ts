@@ -17,6 +17,7 @@ type FilterReason = "self" | "non-guild" | "discord";
 export interface ForwarderStats {
     recordForwardAttempt(ok: boolean): void;
     recordFiltered(reason: FilterReason): void;
+    reset(): void;
     snapshot(): ForwarderStatsSnapshot;
 }
 
@@ -63,6 +64,13 @@ export function createForwarderStats(): ForwarderStats {
             if (reason === "self") values.filteredSelf++;
             if (reason === "non-guild") values.filteredNonGuild++;
             if (reason === "discord") values.filteredDiscord++;
+        },
+        reset() {
+            values.forwarded = 0;
+            values.failed = 0;
+            values.filteredSelf = 0;
+            values.filteredNonGuild = 0;
+            values.filteredDiscord = 0;
         },
         snapshot() {
             return { ...values };

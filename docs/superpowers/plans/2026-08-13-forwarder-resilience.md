@@ -30,7 +30,7 @@ Add exported `ForwardRequest`, `ForwardContext`, `AttemptDiagnostic`, and extend
 
 - [ ] **Step 2: Add bounded diagnostic helpers**
 
-Implement `redactUrl()`, `serializeError()`, `classifyFailure()`, and excerpt helpers. Recursively walk `cause` with cycle/depth limits; retain `name`, `message`, `code`, `errno`, `syscall`, `hostname`, `address`, `port`, and bounded stack text. Replace sensitive query values (`access_token`, `token`, `key`, `secret`) with `[REDACTED]`.
+Implement `redactUrl()`, `serializeError()`, `classifyFailure()`, and bounded diagnostic helpers. Recursively walk `cause` with cycle/depth limits; retain `name`, `message`, `code`, `errno`, `syscall`, `hostname`, `address`, `port`, and bounded stack text. Replace sensitive query values (`access_token`, `token`, `key`, `secret`) with `[REDACTED]`. Do not retain failed response bodies because an endpoint can echo private payload data.
 
 - [ ] **Step 3: Implement endpoint attempts**
 

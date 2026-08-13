@@ -72,7 +72,7 @@ Every attempt records:
 - elapsed time;
 - failure category;
 - HTTP status and status text when available;
-- a bounded response-body excerpt;
+- the response length, without retaining error response bodies that could echo private payload data;
 - selected diagnostic response headers such as `Retry-After`;
 - serialized error and nested `cause` information.
 

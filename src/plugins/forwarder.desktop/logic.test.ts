@@ -30,6 +30,16 @@ assert.deepEqual(stats.snapshot(), {
     filteredDiscord: 0,
 });
 
+stats.recordFiltered("discord");
+stats.reset();
+assert.deepEqual(stats.snapshot(), {
+    forwarded: 0,
+    failed: 0,
+    filteredSelf: 0,
+    filteredNonGuild: 0,
+    filteredDiscord: 0,
+});
+
 assert.equal(shouldForwardGuildNotification({
     optimistic: false,
     message: {

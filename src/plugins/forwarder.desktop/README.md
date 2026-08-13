@@ -22,6 +22,34 @@ Its health check is available at:
 http://127.0.0.1:49321/healthz
 ```
 
+## Delivery resilience
+
+The plugin retries each configured endpoint at most five times total. After failed attempts it waits 1, 2, 4, and 5 seconds before the next attempt. HTTP error responses and network failures are retried; invalid URLs and unsupported protocols are reported immediately without redundant attempts.
+
+The default fallback endpoint is:
+
+```text
+https://forwarder.yufeng.run/forward
+```
+
+Fallback delivery starts only after the primary endpoint is exhausted and uses the same five-attempt policy. A successful request stops the sequence immediately. With both endpoints enabled, one notification can produce at most ten forwarding requests.
+
+Failure reports include the endpoint, attempt number, duration, HTTP status, response length, selected safe headers, or the nested network cause exposed by Node.js/Undici. Error response bodies are intentionally excluded because an endpoint could echo private Discord content. Common details such as `ENOTFOUND`, `EAI_AGAIN`, `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, TLS errors, syscall, hostname, address, and port are retained instead of reporting only `fetch failed`. Each network request has a 30-second timeout so a stalled endpoint cannot permanently block retries or fallback.
+
+## DingTalk failure alerts
+
+DingTalk alerts are enabled by default and can be disabled or pointed at a different robot webhook in plugin settings. The webhook input is visually masked, although Vencord still stores its value in the local settings file.
+
+One text alert is sent only when every configured forwarding endpoint has failed. It begins with the required `Discord` keyword and contains bounded attempt diagnostics plus message, channel, and guild identifiers. It does not include Discord message content, the forwarded payload, attachment URLs, or webhook credentials. Sensitive URL query values such as `access_token`, `token`, `key`, and `secret` are redacted.
+
+An alert-delivery failure is logged locally and never triggers another alert or replaces the original forwarding result.
+
+## Plugin controls
+
+The settings page provides independent health checks for the primary and fallback endpoints. Each performs one GET request against that endpoint's `/healthz` URL; health checks do not retry, switch endpoints, send alerts, or affect forwarding statistics.
+
+`Refresh stats` reads the current plugin-session counters. `Clear stats` resets forwarded, failed, and all skipped counters. The previous test-payload action has been removed so health verification cannot insert synthetic messages downstream.
+
 ## Attachment handling
 
 The plugin does not inline images or other attachments into the forwarded JSON. For each Discord attachment it sends:
@@ -45,7 +73,7 @@ The plugin does not inline images or other attachments into the forwarded JSON. 
 
 The server downloads attachments itself, preferring `download.url`, then `proxyUrl`, then `url`. The SQLite sink is always enabled and stores the full payload plus attachment bytes in the database.
 
-The plugin settings page includes a health check button for this endpoint and runtime-only counters for forwarded, failed, and skipped notifications.
+The plugin settings page includes separate health checks for the primary and fallback endpoints and runtime-only counters for forwarded, failed, and skipped notifications.
 
 ## Server configuration
 
