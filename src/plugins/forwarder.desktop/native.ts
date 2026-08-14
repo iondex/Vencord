@@ -206,24 +206,24 @@ function buildErrorSummary(attempts: AttemptDiagnostic[]) {
     return attempts.map(diagnosticLine).join("\n");
 }
 
-function dingTalkDiagnosticLine(diagnostic: AttemptDiagnostic) {
-    const prefix = `${diagnostic.role} ${diagnostic.attempt}/${diagnostic.maxAttempts} ${diagnostic.url}`;
+function failureReason(diagnostic: AttemptDiagnostic | undefined) {
+    if (!diagnostic) return "unknown";
     if (diagnostic.status !== undefined) {
-        const retryAfter = diagnostic.retryAfter ? ` retryAfter=${diagnostic.retryAfter}` : "";
-        return `${prefix}: HTTP ${diagnostic.status}${diagnostic.statusText ? ` ${diagnostic.statusText}` : ""} duration=${diagnostic.durationMs}ms${retryAfter}`;
+        return `HTTP ${diagnostic.status}${diagnostic.statusText ? ` ${diagnostic.statusText}` : ""}`;
     }
 
-    const causes = flattenErrors(diagnostic.error).map(item => [
-        item.name,
-        item.code,
-        item.message,
-        item.errno === undefined ? undefined : `errno=${item.errno}`,
-        item.syscall ? `syscall=${item.syscall}` : undefined,
-        item.hostname ? `hostname=${item.hostname}` : undefined,
-        item.address ? `address=${item.address}` : undefined,
-        item.port === undefined ? undefined : `port=${item.port}`,
-    ].filter(Boolean).join(" ")).join(" <- ");
-    return `${prefix}: ${diagnostic.category ?? "unknown"} ${causes || "request failed"} duration=${diagnostic.durationMs}ms`;
+    const rootError = flattenErrors(diagnostic.error).at(-1);
+    if (!rootError) return diagnostic.category ?? "unknown";
+    return [rootError.code, rootError.message].filter(Boolean).join(" ") || diagnostic.category || "unknown";
+}
+
+function aggregateFailureReasons(attempts: AttemptDiagnostic[]) {
+    const counts = new Map<string, number>();
+    for (const attempt of attempts) {
+        const reason = failureReason(attempt);
+        counts.set(reason, (counts.get(reason) ?? 0) + 1);
+    }
+    return Array.from(counts, ([reason, count]) => `${reason} × ${count}`).join("\n");
 }
 
 async function attemptEndpoint(
@@ -304,22 +304,15 @@ function configurationDiagnostic(role: AttemptDiagnostic["role"], value: string,
 function buildDingTalkContent(request: ForwardRequest, attempts: AttemptDiagnostic[], now: number) {
     const context = request.context ?? {};
     const finalAttempt = attempts.at(-1);
-    const rootCause = finalAttempt?.error
-        ? JSON.stringify(finalAttempt.error)
-        : finalAttempt?.status !== undefined
-            ? `HTTP ${finalAttempt.status}${finalAttempt.statusText ? ` ${finalAttempt.statusText}` : ""}`
-            : "unknown";
     const lines = [
         "Discord forwarder failure",
         `time=${new Date(now).toISOString()}`,
-        `primary=${redactUrl(request.primaryUrl)}`,
-        `fallback=${request.fallbackUrl?.trim() ? redactUrl(request.fallbackUrl.trim()) : "not configured"}`,
         `messageId=${context.messageId ?? "unknown"}`,
         `channelId=${context.channelId ?? "unknown"}`,
         `guildId=${context.guildId ?? "unknown"}`,
-        `rootCause=${rootCause}`,
-        "attempts:",
-        attempts.map(dingTalkDiagnosticLine).join("\n"),
+        `rootCause=${failureReason(finalAttempt)}`,
+        "reasons:",
+        aggregateFailureReasons(attempts),
     ];
     return excerpt(lines.join("\n"), MAX_ALERT_LENGTH);
 }

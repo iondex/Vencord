@@ -118,6 +118,7 @@ async function main() {
             alertBodies.push(String(init?.body));
             return response(200, "ok", "OK");
         }
+        if (url.includes("fallback.test")) return response(502, "fallback down", "Bad Gateway");
         throw fetchFailure;
     }) as typeof fetch);
 
@@ -141,7 +142,11 @@ async function main() {
     assert.doesNotMatch(result.errorSummary ?? "", /primary-secret|fallback-secret/);
     assert.equal(alertBodies.length, 1);
     assert.match(alertBodies[0], /Discord forwarder failure/);
-    assert.match(alertBodies[0], /ECONNREFUSED/);
+    assert.match(alertBodies[0], /rootCause=HTTP 502 Bad Gateway/);
+    assert.match(alertBodies[0], /HTTP 502 Bad Gateway × 5/);
+    assert.match(alertBodies[0], /ECONNREFUSED connect ECONNREFUSED 127\.0\.0\.1:49321 × 5/);
+    assert.equal(alertBodies[0].match(/ECONNREFUSED/g)?.length, 2);
+    assert.doesNotMatch(alertBodies[0], /primary=|fallback=|primary\.test|fallback\.test|attempts:|"cause"|"stack"/);
     assert.doesNotMatch(alertBodies[0], /private Discord message|primary-secret|fallback-secret|ding-secret/);
 }
 

@@ -40,7 +40,7 @@ Failure reports include the endpoint, attempt number, duration, HTTP status, res
 
 DingTalk alerts are enabled by default and can be disabled or pointed at a different robot webhook in plugin settings. Vencord stores the webhook value in its local settings file.
 
-One text alert is sent only when every configured forwarding endpoint has failed. It begins with the required `Discord` keyword and contains bounded attempt diagnostics plus message, channel, and guild identifiers. It does not include Discord message content, the forwarded payload, attachment URLs, or webhook credentials. Sensitive URL query values such as `access_token`, `token`, `key`, and `secret` are redacted.
+One text alert is sent only when every configured forwarding endpoint has failed. It begins with the required `Discord` keyword and contains message, channel, and guild identifiers, one concise final root cause, and identical failure reasons aggregated with occurrence counts. It does not include primary/fallback URLs, individual retry lines, Discord message content, the forwarded payload, attachment URLs, or webhook credentials.
 
 An alert-delivery failure is logged locally and never triggers another alert or replaces the original forwarding result.
 
