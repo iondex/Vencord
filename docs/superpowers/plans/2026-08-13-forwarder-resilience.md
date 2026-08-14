@@ -42,7 +42,7 @@ Attempt fallback only after primary exhaustion. Skip an empty fallback and skip 
 
 - [ ] **Step 5: Implement one-shot DingTalk alerting**
 
-After total failure, post a single `{ msgtype: "text", text: { content } }` request when enabled and the webhook is a valid HTTP(S) URL. Begin content with `Discord forwarder failure`, include safe context plus bounded diagnostics, and exclude message content/payload. Capture and locally log alert failures without changing the original result or sending another alert.
+After total failure, post a single `{ msgtype: "text", text: { content } }` request when enabled and the webhook is a valid HTTP(S) URL. Begin content with `Discord forwarder failure`, include safe context, one concise final-attempt root cause, and identical failure reasons aggregated across primary and fallback with occurrence counts. Exclude endpoint URLs, per-attempt repetition, message content, and payload data. Capture and locally log alert failures without changing the original result or sending another alert.
 
 - [ ] **Step 6: Keep native IPC exports thin**
 
@@ -90,7 +90,7 @@ Reject fetch with `new TypeError("fetch failed", { cause })`, where the cause in
 
 - [ ] **Step 4: Cover DingTalk behavior**
 
-Assert exactly one DingTalk POST after total failure, no alert after recovery or when disabled, required `Discord` keyword, correct JSON shape, and an unchanged forwarding failure when the alert request itself rejects.
+Assert exactly one DingTalk POST after total failure, no alert after recovery or when disabled, required `Discord` keyword, correct JSON shape, no primary/fallback URLs, concise final root cause, cross-endpoint reason aggregation with counts, no repeated attempt lines, and an unchanged forwarding failure when the alert request itself rejects.
 
 - [ ] **Step 5: Run focused tests**
 

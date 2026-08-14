@@ -95,10 +95,11 @@ An alert is sent only after primary and fallback have both failed or all configu
 The alert uses DingTalk's text message format and begins with the required keyword `Discord`, for example `Discord forwarder failure`. It contains:
 
 - timestamp;
-- redacted primary and fallback targets;
 - Discord message, channel, and guild identifiers when available;
-- all bounded attempt summaries and root-cause fields;
-- the final failure summary.
+- one concise `rootCause` derived from the final attempt;
+- an aggregated reason list that combines identical failures across primary and fallback attempts and displays each reason once with its occurrence count.
+
+The DingTalk alert does not identify primary or fallback URLs and does not list every retry separately. For example, five identical primary failures and five identical fallback failures appear as one reason with `× 10`. The local console result retains per-attempt structured diagnostics.
 
 It does not contain Discord message text, attachment URLs, payload bodies, or webhook credentials.
 
@@ -139,6 +140,8 @@ Coverage includes:
 - bounded response bodies and stacks;
 - sensitive query-parameter redaction;
 - one DingTalk alert only after total failure;
+- DingTalk reason aggregation across primary and fallback attempts;
+- concise final-attempt root cause without endpoint URLs or per-attempt repetition;
 - no alert after recovery or when alerting is disabled;
 - DingTalk failure leaving the forwarding result intact;
 - independent primary and fallback health URL handling;
