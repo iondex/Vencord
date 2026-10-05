@@ -12,7 +12,7 @@ import { Margins } from "@utils/margins";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import type { MessageJSON } from "@vencord/discord-types";
 import { findByCodeLazy } from "@webpack";
-import { Button, ChannelStore, Forms, GuildStore, showToast, Toasts, UserStore, useState } from "@webpack/common";
+import { Button, ChannelStore, Forms, GuildStore, showToast, UserStore, useState } from "@webpack/common";
 
 import { createForwarderStats, createHealthUrl, getForwardSkipReason } from "./logic";
 
@@ -330,11 +330,11 @@ function ForwarderSettings() {
 
         if (result.ok) {
             setPrimaryHealth({ status: "ok", message: `Healthy (${result.status})${duration}: ${result.body}` });
-            showToast("Primary forwarder endpoint is healthy", Toasts.Type.SUCCESS);
+            showToast("Primary forwarder endpoint is healthy", "success");
         } else {
             const message = `Health check failed (${result.status})${duration}: ${result.body}`;
             setPrimaryHealth({ status: "error", message });
-            showToast(message, Toasts.Type.FAILURE);
+            showToast(message, "failure");
         }
     }
 
@@ -349,11 +349,11 @@ function ForwarderSettings() {
         const duration = result.durationMs === undefined ? "" : ` in ${result.durationMs}ms`;
         if (result.ok) {
             setFallbackHealth({ status: "ok", message: `Healthy (${result.status})${duration}: ${result.body}` });
-            showToast("Fallback forwarder endpoint is healthy", Toasts.Type.SUCCESS);
+            showToast("Fallback forwarder endpoint is healthy", "success");
         } else {
             const message = `Health check failed (${result.status})${duration}: ${result.body}`;
             setFallbackHealth({ status: "error", message });
-            showToast(message, Toasts.Type.FAILURE);
+            showToast(message, "failure");
         }
     }
 

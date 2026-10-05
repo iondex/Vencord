@@ -19,15 +19,13 @@
 import "./checkNodeVersion.js";
 
 import { execFileSync } from "child_process";
-import { cpSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { Readable } from "stream";
 import { finished } from "stream/promises";
 import { fileURLToPath } from "url";
 
 const BASE_URL = "https://github.com/Vencord/Installer/releases/latest/download/";
-const INSTALLER_APP_DARWIN = "VencordInstaller.app";
-const INSTALLER_PATH_DARWIN = join(INSTALLER_APP_DARWIN, "Contents", "MacOS", "VencordInstaller");
 
 const BASE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FILE_DIR = join(BASE_DIR, "dist", "Installer");
@@ -38,7 +36,7 @@ export function getFilename(platform = process.platform) {
         case "win32":
             return "VencordInstallerCli.exe";
         case "darwin":
-            return "VencordInstaller.dmg";
+            return "VencordInstallerCli-darwin";
         case "linux":
             return "VencordInstallerCli-linux";
         default:
@@ -52,10 +50,7 @@ async function ensureBinary(platform = process.platform) {
 
     mkdirSync(FILE_DIR, { recursive: true });
 
-    const downloadName = join(FILE_DIR, filename);
-    const outputFile = platform === "darwin"
-        ? join(FILE_DIR, INSTALLER_PATH_DARWIN)
-        : downloadName;
+    const outputFile = join(FILE_DIR, filename);
 
     const etag = existsSync(outputFile) && existsSync(ETAG_FILE)
         ? readFileSync(ETAG_FILE, "utf-8")
@@ -75,39 +70,11 @@ async function ensureBinary(platform = process.platform) {
     if (!res.ok)
         throw new Error(`Failed to download installer: ${res.status} ${res.statusText}`);
 
-    // WHY DOES NODE FETCH RETURN A WEB STREAM OH MY GOD
     const body = Readable.fromWeb(res.body);
-    await finished(body.pipe(createWriteStream(downloadName, {
+    await finished(body.pipe(createWriteStream(outputFile, {
         mode: 0o755,
         autoClose: true
     })));
-
-    if (platform === "darwin") {
-        console.log("Mounting disk image...");
-        const mountDir = join(FILE_DIR, "mount");
-        const appDir = join(FILE_DIR, INSTALLER_APP_DARWIN);
-        const nextAppDir = join(FILE_DIR, INSTALLER_APP_DARWIN + ".next");
-        let mounted = false;
-
-        rmSync(mountDir, { recursive: true, force: true });
-        rmSync(nextAppDir, { recursive: true, force: true });
-        mkdirSync(mountDir);
-
-        try {
-            execFileSync("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mountDir, downloadName], {
-                stdio: "inherit"
-            });
-            mounted = true;
-            cpSync(join(mountDir, INSTALLER_APP_DARWIN), nextAppDir, { recursive: true });
-        } finally {
-            if (mounted)
-                execFileSync("hdiutil", ["detach", mountDir], { stdio: "inherit" });
-            rmSync(mountDir, { recursive: true, force: true });
-        }
-
-        rmSync(appDir, { recursive: true, force: true });
-        renameSync(nextAppDir, appDir);
-    }
 
     writeFileSync(ETAG_FILE, res.headers.get("etag") ?? "");
     console.log("Finished downloading!");

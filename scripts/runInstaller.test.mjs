@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 
 import { getFilename } from "./runInstaller.mjs";
 
-assert.equal(getFilename("darwin"), "VencordInstaller.dmg");
+assert.equal(getFilename("darwin"), "VencordInstallerCli-darwin");
 assert.equal(getFilename("linux"), "VencordInstallerCli-linux");
 assert.equal(getFilename("win32"), "VencordInstallerCli.exe");
 assert.throws(() => getFilename("freebsd"), /Unsupported platform: freebsd/);

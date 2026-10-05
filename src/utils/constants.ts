@@ -670,6 +670,10 @@ export const Devs = /* #__PURE__*/ Object.freeze({
         name: "iondex",
         id: 0n
     },
+    scattagain: {
+        name: "Amelia",
+        id: 1098234477626544180n
+    },
     Davri: {
         name: "Davri",
         id: 457579346282938368n
@@ -677,6 +681,10 @@ export const Devs = /* #__PURE__*/ Object.freeze({
     Kaede: {
         name: "Kaede",
         id: 1492642701320126504n
+    },
+    c0nnorgg: {
+        name: "c0nnorgg",
+        id: 1088882977985003620n,
     }
 } satisfies Record<string, Dev>);
 
