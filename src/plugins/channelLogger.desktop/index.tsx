@@ -237,7 +237,7 @@ function enableChannelLogger(channel: Channel) {
         payloadKind: "snapshot",
         payloadSource: "message-store",
     });
-    showToast(`已开启 ${guild.name} / #${channel.name} 的可见消息 logger`, "success");
+    showToast({ text: `已开启 ${guild.name} / #${channel.name} 的可见消息 logger`, variant: "success" });
 }
 
 function disableChannelLogger(channelId: string) {
@@ -248,7 +248,7 @@ function disableChannelLogger(channelId: string) {
     closingChannels.set(channelId, disabled);
     queue.closeChannel(channelId);
     saveEnabledChannels(next);
-    showToast("已停止该频道的新消息记录；服务端历史数据未删除。", "success");
+    showToast({ text: "已停止该频道的新消息记录；服务端历史数据未删除。", variant: "success" });
 }
 
 const channelContextMenuPatch: NavContextMenuPatchCallback = (children, props) => {
@@ -304,7 +304,7 @@ function LoggerSettings() {
         const healthUrl = createApiUrl(pluginSettings.serverUrl.trim(), "/api/health");
         if (!healthUrl) {
             setHealth({ ok: false, message: "服务地址必须是本机 HTTP 地址" });
-            if (!silent) showToast("Channel logger 服务地址无效", "failure");
+            if (!silent) showToast({ text: "Channel logger 服务地址无效", variant: "critical" });
             return;
         }
 
@@ -316,7 +316,7 @@ function LoggerSettings() {
                 : `连接失败 (${healthResult.status}): ${healthResult.body}`;
             setHealth({ ok: false, message });
             setChecking(false);
-            if (!silent) showToast(message, "failure");
+            if (!silent) showToast({ text: message, variant: "critical" });
             return;
         }
 
@@ -326,7 +326,7 @@ function LoggerSettings() {
             const message = `读取频道状态失败 (${statusResult.status}): ${statusResult.body}`;
             setHealth({ ok: false, message });
             setChecking(false);
-            if (!silent) showToast(message, "failure");
+            if (!silent) showToast({ text: message, variant: "critical" });
             return;
         }
         try {
@@ -337,18 +337,18 @@ function LoggerSettings() {
             const message = `频道状态响应无效: ${error instanceof Error ? error.message : String(error)}`;
             setHealth({ ok: false, message });
             setChecking(false);
-            if (!silent) showToast(message, "failure");
+            if (!silent) showToast({ text: message, variant: "critical" });
             return;
         }
         setHealth({ ok: true, message: `服务正常 (${healthResult.status}) · ${new Date().toLocaleTimeString()}` });
         setChecking(false);
-        if (!silent) showToast("Channel logger 服务正常", "success");
+        if (!silent) showToast({ text: "Channel logger 服务正常", variant: "success" });
     }
 
     function download(channelId: string) {
         const url = createApiUrl(pluginSettings.serverUrl.trim(), `${LOGGER_API_PREFIX}/channels/${channelId}/download`);
         if (!url) {
-            showToast("Channel logger 服务地址无效", "failure");
+            showToast({ text: "Channel logger 服务地址无效", variant: "critical" });
             return;
         }
         VencordNative.native.openExternal(url);

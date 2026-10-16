@@ -330,11 +330,11 @@ function ForwarderSettings() {
 
         if (result.ok) {
             setPrimaryHealth({ status: "ok", message: `Healthy (${result.status})${duration}: ${result.body}` });
-            showToast("Primary forwarder endpoint is healthy", "success");
+            showToast({ text: "Primary forwarder endpoint is healthy", variant: "success" });
         } else {
             const message = `Health check failed (${result.status})${duration}: ${result.body}`;
             setPrimaryHealth({ status: "error", message });
-            showToast(message, "failure");
+            showToast({ text: message, variant: "critical" });
         }
     }
 
@@ -349,11 +349,11 @@ function ForwarderSettings() {
         const duration = result.durationMs === undefined ? "" : ` in ${result.durationMs}ms`;
         if (result.ok) {
             setFallbackHealth({ status: "ok", message: `Healthy (${result.status})${duration}: ${result.body}` });
-            showToast("Fallback forwarder endpoint is healthy", "success");
+            showToast({ text: "Fallback forwarder endpoint is healthy", variant: "success" });
         } else {
             const message = `Health check failed (${result.status})${duration}: ${result.body}`;
             setFallbackHealth({ status: "error", message });
-            showToast(message, "failure");
+            showToast({ text: message, variant: "critical" });
         }
     }
 
