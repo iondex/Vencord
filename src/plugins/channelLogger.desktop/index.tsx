@@ -8,14 +8,15 @@ import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/Co
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Flex } from "@components/Flex";
+import { Heading } from "@components/Heading";
 import { CloudDownloadIcon, DeleteIcon, LogIcon, RestartIcon } from "@components/Icons";
+import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import type { Channel } from "@vencord/discord-types";
 import {
     ChannelStore,
-    Forms,
     GuildStore,
     Menu,
     MessageStore,
@@ -363,13 +364,13 @@ function LoggerSettings() {
     return (
         <Flex flexDirection="column" gap="20px">
             <section>
-                <Forms.FormTitle tag="h3">Logger 服务</Forms.FormTitle>
+                <Heading tag="h3">Logger 服务</Heading>
                 <Flex alignItems="center" justifyContent="space-between" gap="12px" flexWrap="wrap">
                     <div style={{ minWidth: 0 }}>
-                        <Forms.FormText style={{ color: healthColor }}>{health.message}</Forms.FormText>
-                        <Forms.FormText style={{ fontFamily: "var(--font-code)", overflowWrap: "anywhere" }}>
+                        <Paragraph style={{ color: healthColor }}>{health.message}</Paragraph>
+                        <Paragraph style={{ fontFamily: "var(--font-code)", overflowWrap: "anywhere" }}>
                             {pluginSettings.serverUrl}
-                        </Forms.FormText>
+                        </Paragraph>
                     </div>
                     <Button size="small" onClick={() => void checkHealthAndStatuses(false)} disabled={checking}>
                         <RestartIcon width={16} height={16} />
@@ -379,8 +380,8 @@ function LoggerSettings() {
             </section>
 
             <section>
-                <Forms.FormTitle tag="h3">频道消息记录</Forms.FormTitle>
-                {channels.length === 0 && <Forms.FormText>本地服务中没有频道记录。</Forms.FormText>}
+                <Heading tag="h3">频道消息记录</Heading>
+                {channels.length === 0 && <Paragraph>本地服务中没有频道记录。</Paragraph>}
                 {channels.map(channel => {
                     const runtime = queue.status(channel.channelId);
                     const remote = channel.status as RemoteChannelStatus | null;
@@ -398,22 +399,22 @@ function LoggerSettings() {
                             style={{ borderTop: "1px solid var(--background-modifier-accent)", padding: "12px 0" }}
                         >
                             <div style={{ minWidth: 0 }}>
-                                <Forms.FormText><strong>{guildName} / #{channelName}</strong></Forms.FormText>
-                                <Forms.FormText style={{ color: "var(--text-muted)", overflowWrap: "anywhere" }}>
+                                <Paragraph><strong>{guildName} / #{channelName}</strong></Paragraph>
+                                <Paragraph style={{ color: "var(--text-muted)", overflowWrap: "anywhere" }}>
                                     {channel.state === "recording" ? "记录中" : channel.state === "closing" ? "正在关闭" : "已停止"}
                                     {` · ${channel.channelId}`}
                                     {channel.state !== "stopped" ? ` · 待发送 ${runtime.pendingRecords} 条 / ${formatBytes(runtime.pendingBytes)}` : ""}
-                                </Forms.FormText>
+                                </Paragraph>
                                 {remote && (
-                                    <Forms.FormText style={{ color: "var(--text-muted)", overflowWrap: "anywhere" }}>
+                                    <Paragraph style={{ color: "var(--text-muted)", overflowWrap: "anywhere" }}>
                                         已保存 {remote.messageCount} 条 · 捕获事件 {remote.eventCount} 条 · 已标记删除 {remote.deletedCount} 条
                                         {` · 消息时间 ${formatMessageTime(remote.oldestMessageAt)} - ${formatMessageTime(remote.newestMessageAt)}`}
-                                    </Forms.FormText>
+                                    </Paragraph>
                                 )}
                                 {runtime.lastError && (
-                                    <Forms.FormText style={{ color: "var(--text-danger)", overflowWrap: "anywhere" }}>
+                                    <Paragraph style={{ color: "var(--text-danger)", overflowWrap: "anywhere" }}>
                                         {runtime.lastError}
-                                    </Forms.FormText>
+                                    </Paragraph>
                                 )}
                             </div>
                             <Flex gap="8px" style={{ flex: "0 0 auto" }}>

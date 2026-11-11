@@ -5,14 +5,17 @@
  */
 
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
 import { Flex } from "@components/Flex";
+import { Heading } from "@components/Heading";
+import { Paragraph } from "@components/Paragraph";
 import { Devs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import { Margins } from "@utils/margins";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import type { MessageJSON } from "@vencord/discord-types";
 import { findByCodeLazy } from "@webpack";
-import { Button, ChannelStore, Forms, GuildStore, showToast, UserStore, useState } from "@webpack/common";
+import { ChannelStore, GuildStore, showToast, UserStore, useState } from "@webpack/common";
 
 import { createForwarderStats, createHealthUrl, getForwardSkipReason } from "./logic";
 
@@ -294,9 +297,9 @@ function HealthLine({ label, health }: { label: string; health: HealthCheckState
             : "var(--text-muted)";
 
     return (
-        <Forms.FormText style={{ color }}>
+        <Paragraph style={{ color }}>
             <strong>{label}:</strong> {health.message}
-        </Forms.FormText>
+        </Paragraph>
     );
 }
 
@@ -366,7 +369,7 @@ function ForwarderSettings() {
                 <Button onClick={() => void handleFallbackHealthCheck()} disabled={!fallbackUrl || fallbackHealth.status === "checking"}>
                     {fallbackHealth.status === "checking" ? "Checking fallback..." : "Check fallback health"}
                 </Button>
-                <Button color={Button.Colors.PRIMARY} onClick={refreshStats}>
+                <Button variant="secondary" onClick={refreshStats}>
                     Refresh stats
                 </Button>
                 <Button onClick={clearStats}>
@@ -378,8 +381,8 @@ function ForwarderSettings() {
             <HealthLine label="Fallback" health={displayedFallbackHealth} />
 
             <div className={Margins.top8}>
-                <Forms.FormTitle tag="h3">Runtime stats</Forms.FormTitle>
-                <Forms.FormText>Current plugin session only.</Forms.FormText>
+                <Heading tag="h3">Runtime stats</Heading>
+                <Paragraph>Current plugin session only.</Paragraph>
                 <Flex flexDirection="column" gap="4px" className={Margins.top8}>
                     <StatsLine label="Forwarded" value={statsSnapshot.forwarded} />
                     <StatsLine label="Failed" value={statsSnapshot.failed} />
