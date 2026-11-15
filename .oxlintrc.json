@@ -130,6 +130,8 @@
         {
             "files": [
                 "signal-hub/**",
+                "src/plugins/transcribe.desktop/**",
+                "scripts/transcribe/**",
                 "scripts/build/pluginProfile.mjs",
                 "src/plugins/forwarder.desktop/localTransport.ts",
                 "src/plugins/forwarder.desktop/localTransport.test.ts"

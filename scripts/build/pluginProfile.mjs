@@ -17,5 +17,5 @@ for (const plugin of profile.plugins) {
 export function includePlugin(directory, name) {
     return ["plugins/_api", "plugins/_core", "src/plugins/_api", "src/plugins/_core"].includes(directory)
         || (["plugins", "src/plugins"].includes(directory)
-            && profile.plugins.some(plugin => plugin.directory === name));
+            && (name === "transcribe.desktop" || profile.plugins.some(plugin => plugin.directory === name)));
 }
