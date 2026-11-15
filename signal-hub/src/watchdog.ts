@@ -1,8 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { writeDurable } from "./files.js";
+import { getRuntimeDirectory, loadDingTalkWebhook } from "./runtime.js";
 
 export function createWatchdog(directory: string, webhook: string | undefined, fetcher: typeof fetch = fetch) {
     const statePath = join(directory, "watchdog-state.json");
@@ -55,10 +56,10 @@ export function createWatchdog(directory: string, webhook: string | undefined, f
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-    const directory = process.env.SIGNAL_HUB_VAR ?? fileURLToPath(new URL("../var", import.meta.url));
-    const secretsPath = join(directory, "secrets.json");
-    const secrets = existsSync(secretsPath) ? JSON.parse(readFileSync(secretsPath, "utf8")) : {};
-    const check = createWatchdog(directory, process.env.DINGTALK_WEBHOOK || secrets.dingTalkWebhook);
+    const directory = getRuntimeDirectory();
+    const webhook = loadDingTalkWebhook(directory);
+    const check = createWatchdog(directory, webhook);
+    console.log(`signal-hub watchdog started; notifications ${webhook ? "enabled" : "disabled"}`);
     await check();
     setInterval(() => { void check(); }, 30_000);
 }

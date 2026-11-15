@@ -13,7 +13,7 @@ pnpm hub:configure
 pnpm hub
 ```
 
-统一入口为 `signal-hub/scripts/start.sh`，也可从任意目录用绝对路径执行 `bash /absolute/path/Vencord/signal-hub/scripts/start.sh`。脚本检查 Node >=22.13.0 和 pnpm，在缺少服务依赖时执行 frozen-lockfile 安装，首次运行自动初始化。`configure` 只准备配置并打印文件位置；默认启动服务。重复运行保留已有配置和 token，部分配置缺失时明确报错。进程通过 exec 启动，SIGTERM/SIGINT 交给服务执行正常退出。
+统一入口为 `signal-hub/scripts/start.sh`，也可从任意目录用绝对路径执行 `bash /absolute/path/Vencord/signal-hub/scripts/start.sh`。脚本检查 Node >=22.13.0 和 pnpm，在缺少服务依赖时执行 frozen-lockfile 安装，首次运行自动初始化。`configure` 只准备配置并打印文件位置；默认启动服务，另支持 `status`、`backup`、`watchdog`。重复运行保留已有配置和 token，部分配置缺失时明确报错；运维子命令不会自动生成新的配对配置。进程通过 exec 启动，SIGTERM/SIGINT 交给服务执行正常退出。
 
 默认运行目录为仓库下的 `signal-hub/var`。可以通过绝对路径环境变量 `SIGNAL_HUB_VAR` 改变位置。目录及私密文件分别使用 0700、0600 权限。`pnpm hub` 首次启动即可接收并归档，但发送 Discord 或请求模型仍须填写业务凭据。
 
@@ -40,11 +40,37 @@ pnpm hub
 
 ```sh
 pnpm hub
-pnpm --dir signal-hub status
-pnpm --dir signal-hub backup
+pnpm hub:status
+pnpm hub:backup
 ```
 
-`status` 直接读取数据库；`GET /healthz` 检查进程 HTTP 存活，认证后的 `GET /api/status` 返回归档/任务状态。HTTP 存活不代表所有目标都能发送，需一起检查任务与告警。
+三个命令分别是前台运行、查看状态及备份；不要把它们当作单个前台进程依次执行。`status` 直接读取数据库，主进程配置损坏或缺失时仍可执行状态和备份；尚未创建数据库时明确报错。`GET /healthz` 检查进程 HTTP 存活，认证后的 `GET /api/status` 返回归档/任务状态。HTTP 存活不代表所有目标都能发送，需一起检查任务与告警。
+
+## 加载 Discord 插件
+
+在已安装根目录依赖的本机 checkout 构建并注入：
+
+```sh
+cd /absolute/path/Vencord
+pnpm build --dev
+pnpm inject
+```
+
+`pnpm inject` 是首次安装或切换开发 checkout 时的交互式注入入口，按提示选择实际 Discord 安装。插件随 Discord 加载；构建后完整退出并重新打开 Discord。只重建已有注入时不必每次重新执行注入器。
+
+先运行 `pnpm hub:configure`，在 `signal-hub/var/secrets.json` 填写 Bot、模型和钉钉等所需凭据。把 `signal-hub/var/plugin-connection.json` 的四个字段填入 forwarder 设置，再将 `mode` 选为 **Local** 并重启 Discord。本机默认地址是 `http://127.0.0.1:49321/forward`；内网部署时队列目录仍填 Discord 机器上的绝对路径。
+
+主服务、watchdog 以及可选 channel-logger 各占一个终端：
+
+| 进程 | 仓库根目录下的命令 |
+| --- | --- |
+| Signal-hub 主服务 | `pnpm hub` |
+| 独立心跳告警 | `pnpm hub:watchdog` |
+| 可选频道日志及补采来源 | `pnpm logger -- --dir /absolute/path/Vencord/signal-hub/var/channel-logger` |
+
+主服务会自行维护解析、投递、补发、配置同步和业务告警任务，不需要另外启动投递 worker。watchdog 没有钉钉凭据时启动输出 `notifications disabled`。仅设置 Local 和配对凭据可以采集归档；实际转发需要服务端发送凭据及可用 routes。
+
+可用 `curl --fail http://127.0.0.1:49321/healthz` 检查 HTTP 存活，用 `pnpm hub:status` 查看任务与告警。开发时可使用 `pnpm build --dev --watch` 持续构建，插件设置中标记需重启的连接参数仍应重启 Discord 后生效。
 
 ## 本机和内网部署
 
@@ -60,7 +86,7 @@ pnpm --dir signal-hub backup
 
 原生发送器通过 HTTP(S) 调用，支持内网域名/IP，不依赖 renderer CORS。认证令牌只放 Authorization 头，URL 不允许用户名、密码、query 和 fragment；重定向不会携带凭据继续请求。HTTP 传输适合受信内网，跨越不可信网络时使用 TLS 入口。
 
-插件只注册 `forwarder`、`channel-logger` 及上游必需的 `_api` / `_core`。两插件默认启用，显式关闭的设置会被保留。`ChannelLogger` / `channellogger` 的旧设置迁移到 `channel-logger`；新名称已有设置时优先保留新设置。
+文字链路的构建 profile 注册 `forwarder`、`channel-logger` 及上游必需的 `_api` / `_core`。两插件默认启用，显式关闭的设置会被保留。当前 `local` 分支另已合入并行任务的 `transcribe` 插件；它有独立的设置和实现，本说明中的 Local/Remote 切换仅指 forwarder。`ChannelLogger` / `channellogger` 的旧设置迁移到 `channel-logger`；新名称已有设置时优先保留新设置。
 
 原有用户使用的 remote 行为作为迁移默认值保留，避免升级时凭空把消息切到尚未配置的接收服务。配置完配对信息后显式选择 Local。Local 完全独立，不会转回 CF `/forward`。
 
@@ -108,7 +134,9 @@ Signal 使用固定参考版本的纯解析模块；普通投送和模型输入�
 
 确定失败或发送前的失败统一由 SQLite 调度：首次失败后最多再重试 **5 次**，延迟为 **1、2、4、8、16 秒**；429 的服务端等待时间优先取较大值。这里是“首次尝试 + 5 次重试”，最多 6 次。模型 SDK 内部重试关闭，避免隐藏的重试层。网络等待不占用同步 sleep，也不在插件里增加路由或发送逻辑。
 
-本轮耗尽后进入 `retry_wait`，保留完整记录，最早 5 分钟后补发。独立修复任务每 60 秒扫描到期项，增加 `recovery_cycles`、重置本轮计数并交回同一发送池。进程重启后仍从数据库恢复。修复不会绕过暂停、当前 route 禁用/来源变更、当前 Signal 关闭、排除名单及防回流检查。内容、目标和解析参数按任务创建时的配置快照固定，下一轮 CF 同步不会把旧任务改投另一个频道。
+本轮耗尽后进入 `retry_wait`，保留完整记录，最早 5 分钟后补发。独立修复任务每 60 秒扫描到期项，增加 `recovery_cycles`、重置本轮计数并交回同一发送池。新任务使用实际入队时间作为到期时间，避免持续新增任务以 `due_at=0` 永久抢在已到期重试前面。进程重启后仍从数据库恢复。修复不会绕过暂停、当前 route 禁用/来源变更/多 route 冲突、当前 Signal 关闭、排除名单及防回流检查。
+
+消息在接收入库时固定当时有效的配置快照，处理及任务继续使用该快照；接收后、规划前的 CF 更新也不会把消息改投新目标。等待首份配置或待修复 route 冲突的消息在安装有效配置后重新绑定；其他已绑定消息不改写。旧数据库缺少接收版本时，只能在迁移时绑定当时有效快照，不能还原过去未记录的版本。已有发送任务的固定快照保持原样。
 
 如果请求已经发出但响应丢失、返回 5xx/408 或 ACK 不可信，结果是 `uncertain`，**不能把它当作确定失败直接补发**。定时对账优先通过 Bot nonce 找到已发送消息并标记成功；无法确认的记录持续保留、持续告警，由人工确认。Webhook 没有关联 nonce 时尤其不能自动声称“没发过”。对账采用持久化游标轮转，早期无法确认的记录不会饿死后面的记录。
 
@@ -160,7 +188,7 @@ Signal 使用固定参考版本的纯解析模块；普通投送和模型输入�
 
 健康检查每 30 秒检查归档积压和已到期投递积压；等待超过一分钟会生成严重告警。暂停状态下不把主动暂停当作投递卡死。某个目标恢复不会替其他尚未恢复的任务解除告警。
 
-进程用系统服务管理器常驻，并设置失败自动重启。`pnpm --dir signal-hub watchdog` 作为独立进程运行，每 30 秒检查磁盘 heartbeat；heartbeat 超过 120 秒、缺失或损坏且连续三次检查异常后发严重通知，持续异常每 5 分钟提醒，恢复通知一次。其已通知状态与重试/限频保存到 `var/watchdog-state.json`，避免 watchdog 重启导致重复刷屏。独立 watchdog 仍与主机共命运；主机完全宕机的告警需要部署在其他机器的外部监控。
+进程用系统服务管理器常驻，并设置失败自动重启。`pnpm hub:watchdog` 作为独立进程运行，每 30 秒检查磁盘 heartbeat；heartbeat 超过 120 秒、缺失或损坏且连续三次检查异常后发严重通知，持续异常每 5 分钟提醒，恢复通知一次。其已通知状态与重试/限频保存到 `var/watchdog-state.json`，避免 watchdog 重启导致重复刷屏。磁盘满或状态无法持久化时仍尽力发送通知，当前进程继续以内存限频；此时 watchdog 自身重启后的通知去重无法保证。独立 watchdog 仍与主机共命运；主机完全宕机的告警需要部署在其他机器的外部监控。
 
 channel-logger 服务保持原端口和数据库结构，可把运行目录指定为：
 

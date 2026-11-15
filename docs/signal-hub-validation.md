@@ -41,6 +41,8 @@ CF remote 契约测试使用固定真实 schema：四类 nullable 输入在旧�
 
 ## 线上只读核对
 
+第二轮复审没有追加线上读取。以下为此前执行的只读核对记录。
+
 使用当前 `createConfigSync` 对 `https://forwarder.yufeng.run` 执行两次完整读取，校验成功并得到 51 条 routes、45 条 enabled、Signal 开启、42 个目标 profiles。读取覆盖所有 routes 分页、Signal 配置和目标 profiles，没有写 CF 配置、读取业务 secret、调用生产 `/forward` 或发送 Discord/模型/钉钉测试消息。
 
 ## 尚未通过或尚未执行
@@ -52,3 +54,13 @@ CF remote 契约测试使用固定真实 schema：四类 nullable 输入在旧�
 语音仅完成静态代码定位与实验设计，未进行真实客户端 join/watch、远端音轨录制或实时转录；外部语音文档抓取未取得可验证正文，未引用未经核实的发布日期/协议强制切换日期。
 
 ACK 自动保留清理、完整二进制媒体归档、目标外观重建和人工安全状态释放工具尚未落地。过渡期兼容范围是插件 remote 向旧 CF Worker 发送；Local 不需要实现旧 Worker 消息入口。真实生产发送验收仍未执行。当前实现边界及运行方法以 `docs/signal-hub-operations.md` 为准。
+
+## 第二轮复审与结构整理
+
+- 审查固定范围为 `a276f10a...c1c7b5fa`；规范/结构轴 3 项 P2，需求轴 1 项 P1 与 2 项 P2，均已修复，细节见 `signal-hub-review.md`。
+- `pnpm test:signal-hub` 通过：服务端扩展到 50 个测试，另有 forwarder/native/本地队列与 channel-logger 回归。覆盖接收入库即绑定配置、新路由冲突否决、切换发送身份后的 nonce 对账、到期补发公平性、旧库迁移、发送中断告警及 watchdog 状态写失败后的通知/限频。
+- `pnpm test:ts`、`pnpm --dir signal-hub check`、`pnpm build --dev`、`pnpm fmt:check` 通过。改动 TypeScript 在临时配置下通过其余风格规则；正式 lint 的既有失败单独记录，未视作通过。
+- 启动脚本的 configure/serve/status/backup/watchdog 在临时目录实测；非法配置在建库前失败，损坏配置不阻塞已有数据库的状态和备份，watchdog 可独立启动退出。测试使用 mock CF/Discord/钉钉，无真实投递。
+- 上游重新 fetch 后没有待合并的 `origin/main` 提交。根 lockfile 的 SHA-256 保持上述原值。
+- 复审期间并行转录任务提交 `56cdcb31`，本轮保留该提交及其插件注册。当前构建清单因此另含 `transcribe`；此前“仅两个可选插件”的验证适用于 `c1c7b5fa` 及更早的文字链路基线。
+- 本轮可靠性修复提交为 `9a14bb73`，已推送 `iondex/local`；该批独立导出源码执行 `pnpm test:signal-hub`，48 个服务测试及插件/logger 回归通过。运行配置整理、另 2 个配置回归测试及启动文档作为下一批提交。
