@@ -129,6 +129,17 @@
         },
         {
             "files": [
+                "signal-hub/**",
+                "scripts/build/pluginProfile.mjs",
+                "src/plugins/forwarder.desktop/localTransport.ts",
+                "src/plugins/forwarder.desktop/localTransport.test.ts"
+            ],
+            "rules": {
+                "simple-header/header": "off"
+            }
+        },
+        {
+            "files": [
                 "packages/discord-types/**",
 
                 // Third party code that doesn't have our header

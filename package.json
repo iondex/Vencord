@@ -26,6 +26,8 @@
         "generatePluginJson": "tsx scripts/generatePluginList.ts",
         "generateTypes": "tspc --emitDeclarationOnly --declaration --outDir packages/vencord-types --allowJs false",
         "logger": "tsx scripts/channel-logger/index.ts",
+        "hub": "bash signal-hub/scripts/start.sh",
+        "hub:configure": "bash signal-hub/scripts/start.sh configure",
         "inject": "node scripts/runInstaller.mjs -- --install",
         "uninject": "node scripts/runInstaller.mjs -- --uninstall",
         "lint": "oxlint",

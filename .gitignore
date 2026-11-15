@@ -24,3 +24,4 @@ src/userplugins
 ExtensionCache/
 /settings
 /data/
+signal-hub/var/
