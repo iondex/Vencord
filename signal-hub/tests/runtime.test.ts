@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,13 +10,25 @@ test("runtime initialization validates addresses before writing and preserves ex
     const directory = mkdtempSync(join(tmpdir(), "hub-runtime-"));
     context.after(() => rmSync(directory, { recursive: true, force: true }));
     assert.throws(() => getRuntimeDirectory({ SIGNAL_HUB_VAR: "relative/var" }), /absolute/);
-    for (const environment of [{ SIGNAL_HUB_HOST: " " }, { SIGNAL_HUB_PORT: "0" }, { SIGNAL_HUB_CF_BASE_URL: "ftp://config.test" }, { SIGNAL_HUB_PUBLIC_URL: "http://user:secret@hub.test/forward" }]) {
+    for (const environment of [{ SIGNAL_HUB_HOST: " " }, { SIGNAL_HUB_PORT: "0" }, { SIGNAL_HUB_CF_BASE_URL: "ftp://config.test" }]) {
         assert.throws(() => initializeRuntime(directory, environment));
         assert.equal(existsSync(join(directory, "secrets.json")), false);
     }
     initializeRuntime(directory, { SIGNAL_HUB_HOST: "::", SIGNAL_HUB_PORT: "49325" });
-    const connection = JSON.parse(readFileSync(join(directory, "plugin-connection.json"), "utf8"));
-    assert.equal(connection.localServerUrl, "http://127.0.0.1:49325/forward");
+    assert.deepEqual(readdirSync(directory).sort(), ["secrets.json", "settings.json"]);
+    const settings = loadSettings(directory, {});
+    assert.equal(settings.host, "::");
+    assert.equal(settings.port, 49325);
+    const secrets = loadSecrets(directory, {});
+    assert.match(secrets.pairingToken, /^[a-f0-9]{64}$/);
+    assert.match(secrets.adminToken, /^[a-f0-9]{64}$/);
+    assert.notEqual(secrets.pairingToken, secrets.adminToken);
+    for (const filename of ["settings.json", "secrets.json"]) assert.equal(statSync(join(directory, filename)).mode & 0o777, 0o600);
+    const otherDirectory = join(directory, "other");
+    initializeRuntime(otherDirectory, {});
+    const otherSecrets = loadSecrets(otherDirectory, {});
+    assert.notEqual(secrets.pairingToken, otherSecrets.pairingToken);
+    assert.notEqual(secrets.adminToken, otherSecrets.adminToken);
     const original = readFileSync(join(directory, "secrets.json"), "utf8");
     assert.throws(() => initializeRuntime(directory, {}), /preserve/);
     assert.equal(readFileSync(join(directory, "secrets.json"), "utf8"), original);

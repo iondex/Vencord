@@ -48,14 +48,10 @@ export function initializeRuntime(directory: string, environment = process.env) 
         port: Number(environment.SIGNAL_HUB_PORT ?? 49321),
         cfBaseUrl: environment.SIGNAL_HUB_CF_BASE_URL ?? "https://forwarder.yufeng.run",
     });
-    const connectionHost = ["0.0.0.0", "::"].includes(settings.host) ? "127.0.0.1" : settings.host.includes(":") ? `[${settings.host}]` : settings.host;
-    const localServerUrl = validateServiceUrl(environment.SIGNAL_HUB_PUBLIC_URL ?? `http://${connectionHost}:${settings.port}/forward`).toString();
-    const pairingToken = randomBytes(32).toString("hex");
-    const secrets = secretsSchema.parse({ pairingToken, adminToken: randomBytes(32).toString("hex") });
+    const secrets = secretsSchema.parse({ pairingToken: randomBytes(32).toString("hex"), adminToken: randomBytes(32).toString("hex") });
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     writeDurable(join(directory, "secrets.json"), JSON.stringify(secrets, null, 4));
     writeDurable(join(directory, "settings.json"), JSON.stringify(settings, null, 4));
-    writeDurable(join(directory, "plugin-connection.json"), JSON.stringify({ localServerUrl, localRuntimeDirectory: directory, localPairingToken: pairingToken, excludedServerIds: "" }, null, 4));
 }
 
 export function loadSettings(directory: string, environment = process.env) {

@@ -2,6 +2,15 @@
 
 日期：2026-11-15，Asia/Shanghai。
 
+## JSON 初始化与插件设置
+
+- 分支实际名称为 `local`；`iondex/local` 表示远端 `iondex` 的 `local` 跟踪引用。
+- 初始化只生成 `settings.json` 和 `secrets.json`，配对和管理令牌各使用 32 字节随机值；新目录间凭据不同，文件权限为 0600，重复 configure 保留已有 JSON 和凭据。
+- 连接信息直接在 forwarder 插件设置页填写，不再生成 `plugin-connection.json`，已有旧文件不被删除；原有环境覆盖继续兼容，日常使用 JSON 配置。
+- 更新后的 `pnpm test:signal-hub` 全部通过，包括 50 个服务端测试及 forwarder/native/local transport 和 logger 回归；启动测试直接修改 JSON，并验证 configure 不启动进程、不泄露令牌，服务启动、运维命令和退出正常。
+- `pnpm test:ts`、`pnpm build --dev`、`pnpm fmt:check`、`pnpm generatePluginJson`、shell 语法检查和 `git diff --check` 通过。本轮修改文件通过排除既有相对导入及文件头问题的定向风格检查；完整 lint 的既有问题记录保留。
+- 已在本机 `signal-hub/var` 执行首次 configure，确认仅生成两份 JSON，凭据没有输出或加入 Git；尚未启动生产采集与转发进程。
+
 ## Git 与范围
 
 - 已从 `signal-hub` 创建并切到临时分支 `local`。

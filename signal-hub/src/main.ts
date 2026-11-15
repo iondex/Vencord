@@ -20,7 +20,7 @@ if (!["init", "serve", "status", "backup"].includes(command)) throw new Error("U
 
 if (command === "init") {
     initializeRuntime(runtimeDirectory);
-    console.log(`Created private configuration under ${runtimeDirectory}; copy the plugin connection fields into forwarder settings. Set mode to Local after configuration.`);
+    console.log(`Created settings.json and secrets.json under ${runtimeDirectory}; generated independent pairing and admin tokens. Configure the connection in Discord Settings > Vencord > Plugins > forwarder, using pairingToken from secrets.json, then select Local and restart Discord.`);
 } else {
     const configuration = command === "serve" ? { settings: loadSettings(runtimeDirectory), secrets: loadSecrets(runtimeDirectory) } : undefined;
     const databasePath = join(runtimeDirectory, "db", "signal-hub.sqlite3");

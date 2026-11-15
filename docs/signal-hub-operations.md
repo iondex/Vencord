@@ -1,6 +1,6 @@
 # Signal-hub 本地服务运行说明
 
-开发分支：`local`。文本链路使用独立 Node 服务，CF 保留配置界面。未在生产 Discord 目标启用发送。
+开发分支：`local`。`iondex/local` 是远端 `iondex` 上 `local` 分支的引用，本地及 GitHub 分支名称均为 `local`。文本链路使用独立 Node 服务，CF 保留配置界面。未在生产 Discord 目标启用发送。
 
 过渡期的 CF 兼容要求约束插件 `remote` 模式：继续使用 legacy payload 与旧版 CF Worker 通信。`local` 使用独立的 v2 采集协议，不模拟旧 Worker，也不自动向 CF 消息入口回退。参考新 CF 架构不改变这个兼容边界。
 
@@ -13,28 +13,36 @@ pnpm hub:configure
 pnpm hub
 ```
 
-统一入口为 `signal-hub/scripts/start.sh`，也可从任意目录用绝对路径执行 `bash /absolute/path/Vencord/signal-hub/scripts/start.sh`。脚本检查 Node >=22.13.0 和 pnpm，在缺少服务依赖时执行 frozen-lockfile 安装，首次运行自动初始化。`configure` 只准备配置并打印文件位置；默认启动服务，另支持 `status`、`backup`、`watchdog`。重复运行保留已有配置和 token，部分配置缺失时明确报错；运维子命令不会自动生成新的配对配置。进程通过 exec 启动，SIGTERM/SIGINT 交给服务执行正常退出。
+统一入口为 `signal-hub/scripts/start.sh`，也可从任意目录用绝对路径执行 `bash /absolute/path/Vencord/signal-hub/scripts/start.sh`。脚本检查 Node >=22.13.0 和 pnpm，在缺少服务依赖时执行 frozen-lockfile 安装，首次运行自动初始化。`pnpm hub:configure` 只创建默认 JSON 配置和随机凭据、打印文件位置及插件设置入口，不启动服务；`pnpm hub` 启动服务，首次启动时也会自动初始化，因此 configure 可省略。另支持 `status`、`backup`、`watchdog`。重复运行保留已有配置和 token，部分配置缺失时明确报错；运维子命令不会自动生成新的配对配置。进程通过 exec 启动，SIGTERM/SIGINT 交给服务执行正常退出。
 
 默认运行目录为仓库下的 `signal-hub/var`。可以通过绝对路径环境变量 `SIGNAL_HUB_VAR` 改变位置。目录及私密文件分别使用 0700、0600 权限。`pnpm hub` 首次启动即可接收并归档，但发送 Discord 或请求模型仍须填写业务凭据。
 
-内网机器首次配置示例：
+初始化后直接编辑 `signal-hub/var/settings.json`，所有服务配置和凭据均使用 JSON，无需 `.env` 文件。本机默认内容：
 
-```sh
-SIGNAL_HUB_HOST=0.0.0.0 SIGNAL_HUB_PORT=49321 \
-SIGNAL_HUB_PUBLIC_URL=http://192.168.1.50:49321/forward \
-pnpm hub:configure
-pnpm hub
+```json
+{
+    "host": "127.0.0.1",
+    "port": 49321,
+    "cfBaseUrl": "https://forwarder.yufeng.run",
+    "excludedServerIds": [],
+    "loggerDatabase": "",
+    "recoveryAccountId": "",
+    "botHistoryEnabled": false
+}
 ```
 
-`SIGNAL_HUB_PUBLIC_URL` 是给插件使用的可访问地址，初始化时写入连接文件；不把 `0.0.0.0` 当插件目标。`SIGNAL_HUB_HOST`、`SIGNAL_HUB_PORT`、`SIGNAL_HUB_CF_BASE_URL` 可在初始化时保存，也可在启动时临时覆盖。已有运行目录切换监听位置后，需相应更新插件地址；连接文件不会被脚本重新写入。自定义运行目录时，配置、启动、status、backup 和 watchdog 都应使用相同的 `SIGNAL_HUB_VAR`。
+内网部署时在服务机器将 `host` 改为 `"0.0.0.0"`，按需修改 `port`；在 Discord 的插件设置页填写服务可访问的内网 URL，例如 `http://192.168.1.50:49321/forward`，不要填写 `0.0.0.0`。修改服务监听设置后重启服务；插件连接设置按页面提示重启 Discord。
+
+原有环境变量覆盖仍保留，供临时运维使用；日常配置以 JSON 为准。自定义运行目录时，配置、启动、status、backup 和 watchdog 都应使用相同的 `SIGNAL_HUB_VAR`。
 
 依赖安装和初始化也可分别运行 `pnpm --dir signal-hub install --frozen-lockfile`、`pnpm --dir signal-hub run init`。
 
 初始化产生：
 
 - `var/settings.json`：监听地址、端口、CF 配置源、排除的 Discord server 和历史恢复设置。
-- `var/secrets.json`：插件配对令牌、独立的管理令牌、Discord Bot、模型及告警凭据。
-- `var/plugin-connection.json`：需要填入插件的四个连接字段，不包含业务凭据。
+- `var/secrets.json`：自动生成两个独立的 256 位随机令牌，`pairingToken` 用于插件连接，`adminToken` 用于管理 API；Discord Bot、模型、CF 及告警凭据默认留空。
+
+不再生成 `plugin-connection.json`。插件连接由 Discord 内的 forwarder 设置页保存，服务不读取该旧文件；已有文件不会被脚本删除。令牌只写入凭据文件，不输出到控制台，也不会因重复 configure 而轮换。
 
 运行命令：
 
@@ -58,7 +66,17 @@ pnpm inject
 
 `pnpm inject` 是首次安装或切换开发 checkout 时的交互式注入入口，按提示选择实际 Discord 安装。插件随 Discord 加载；构建后完整退出并重新打开 Discord。只重建已有注入时不必每次重新执行注入器。
 
-先运行 `pnpm hub:configure`，在 `signal-hub/var/secrets.json` 填写 Bot、模型和钉钉等所需凭据。把 `signal-hub/var/plugin-connection.json` 的四个字段填入 forwarder 设置，再将 `mode` 选为 **Local** 并重启 Discord。本机默认地址是 `http://127.0.0.1:49321/forward`；内网部署时队列目录仍填 Discord 机器上的绝对路径。
+先运行 `pnpm hub:configure`，在 `signal-hub/var/secrets.json` 填写 Bot、模型和钉钉等所需凭据。打开 Discord 设置 → Vencord → Plugins → forwarder，在插件配置页直接填写：
+
+| 插件设置 | 本机部署的填写内容 |
+| --- | --- |
+| `mode` | **Local** |
+| `localServerUrl` | 默认 `http://127.0.0.1:49321/forward`；服务在内网时填写该机器的可访问 URL |
+| `localRuntimeDirectory` | Discord 机器上 checkout 的绝对路径，例如 `/absolute/path/Vencord/signal-hub/var` |
+| `localPairingToken` | 服务机器上 `secrets.json` 中的 `pairingToken`，不要使用 `adminToken` |
+| `excludedServerIds` | 按需填写逗号分隔的 server ID，并与服务的 `settings.json` 保持一致 |
+
+保存后完整退出并重启 Discord。插件配置使用 Vencord 自带的设置存储，无需编辑额外连接文件。内网部署时队列目录仍填 Discord 机器上的绝对路径。
 
 主服务、watchdog 以及可选 channel-logger 各占一个终端：
 
@@ -74,7 +92,7 @@ pnpm inject
 
 ## 本机和内网部署
 
-本机默认设置：`host: "127.0.0.1"`、`port: 49321`。在插件中选择 Local 模式，填写 `plugin-connection.json` 的字段并重启插件/Discord。
+本机默认设置：`"host": "127.0.0.1"`、`"port": 49321`。在插件设置页填写上述连接信息、选择 Local 模式并重启 Discord。
 
 服务放在内网机器时：
 
