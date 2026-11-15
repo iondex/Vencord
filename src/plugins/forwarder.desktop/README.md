@@ -1,6 +1,6 @@
 # forwarder
 
-Supports two independent modes: `local` capture to signal-hub on this computer or a LAN machine, and `remote` notification forwarding. Change the mode in plugin settings and restart the client.
+Supports two independent modes: Local capture to signal-hub on this computer or a LAN machine, and Remote notification forwarding. Stored values remain `local` / `remote`. Change the mode in plugin settings and restart the client; the active transport stays unchanged until restart.
 
 Setup, persistence, anti-loop behavior and recovery: [signal-hub operations](../../../docs/signal-hub-operations.md).
 

@@ -33,7 +33,7 @@ const stats = createForwarderStats();
 const settings = definePluginSettings({
     mode: {
         type: OptionType.SELECT,
-        description: "Remote uses notification rules; local captures server messages to signal-hub",
+        description: "Remote uses notification rules; Local captures server messages to signal-hub",
         options: [{ label: "Remote", value: "remote", default: true }, { label: "Local", value: "local" }],
         restartNeeded: true,
     },
@@ -277,6 +277,7 @@ function createPayload(message: ForwarderMessage) {
     });
 }
 
+let activeMode: "local" | "remote" | undefined;
 let localReady: Promise<unknown> | undefined;
 
 async function forwardLocal(message: ForwarderMessage, optimistic?: boolean) {
@@ -396,8 +397,7 @@ function LocalTransportSettings() {
     );
 }
 
-function ForwarderSettings() {
-    if (settings.store.mode === "local") return <LocalTransportSettings />;
+function RemoteTransportSettings() {
     const [primaryHealth, setPrimaryHealth] = useState<HealthCheckState>({
         status: "idle",
         message: "Health check has not run yet."
@@ -489,6 +489,19 @@ function ForwarderSettings() {
     );
 }
 
+function ForwarderSettings() {
+    const { mode } = settings.use(["mode"]);
+    const modeLabel = mode === "local" ? "Local" : "Remote";
+    const activeLabel = activeMode === "local" ? "Local" : activeMode === "remote" ? "Remote" : "Inactive";
+    return (
+        <Flex flexDirection="column" gap="12px">
+            <Paragraph>Active mode: {activeLabel}.</Paragraph>
+            {activeMode && activeMode !== mode && <Paragraph>Restart the client to apply {modeLabel}. Messages continue using {activeLabel} until restart.</Paragraph>}
+            {(activeMode ?? mode) === "local" ? <LocalTransportSettings /> : <RemoteTransportSettings />}
+        </Flex>
+    );
+}
+
 export default definePlugin({
     name: "forwarder",
     enabledByDefault: true,
@@ -498,7 +511,8 @@ export default definePlugin({
     settings,
 
     start() {
-        if (settings.store.mode !== "local") return;
+        activeMode = settings.store.mode === "local" ? "local" : "remote";
+        if (activeMode !== "local") return;
         localReady = Native.configureLocal({
             url: settings.store.localServerUrl.trim(),
             runtimeDirectory: settings.store.localRuntimeDirectory.trim(),
@@ -508,14 +522,16 @@ export default definePlugin({
     },
 
     stop() {
+        activeMode = undefined;
         localReady = undefined;
         void Native.stopLocal().catch(() => logger.error("Unable to stop local sender"));
     },
 
     flux: {
         MESSAGE_CREATE({ message, optimistic }: { message: ForwarderMessage; optimistic?: boolean; }) {
+            if (!activeMode) return;
             void (async () => {
-                if (settings.store.mode === "local") {
+                if (activeMode === "local") {
                     await forwardLocal(message, optimistic);
                 } else if (shouldForward(message, optimistic)) {
                     const channel = ChannelStore.getChannel(message.channel_id);

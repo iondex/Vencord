@@ -64,7 +64,7 @@ pnpm --dir signal-hub backup
 
 原有用户使用的 remote 行为作为迁移默认值保留，避免升级时凭空把消息切到尚未配置的接收服务。配置完配对信息后显式选择 Local。Local 完全独立，不会转回 CF `/forward`。
 
-插件设置中的 `mode` 选项显示为 `Remote` / `Local`，配置值分别为 `remote` / `local`，本机和内网部署都使用 Local。切换模式后重启客户端；Local 的队列状态和健康检查位于同一插件设置页。
+插件设置中的 `mode` 选项显示为 `Remote` / `Local`，配置值分别为 `remote` / `local`，本机和内网部署都使用 Local。切换模式后重启客户端；重启前继续使用当前已启动的模式，设置页显示实际运行模式和待重启提示。Local 的队列状态和健康检查位于同一插件设置页。
 
 ## 凭据
 

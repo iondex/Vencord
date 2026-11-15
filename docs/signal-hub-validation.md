@@ -31,6 +31,14 @@ CF remote 契约测试使用固定真实 schema：四类 nullable 输入在旧�
 
 追加覆盖：钉钉分级合并、严重故障越过普通冷却、持续故障提醒、持久化限频、只恢复已通知事件、通知请求中的恢复与级别升级、watchdog 损坏心跳与跨重启去重/持续提醒、已到期投递积压、部分目标恢复不误解除故障、按原消息定位和隔离状态查询。所有通知均使用 mock，未触达用户真实 webhook。
 
+## 分批发布后的回归
+
+- 从 Git 暂存区导出隔离源码，复用已安装依赖进行验证，避免工作区另一个转录任务的改动进入本次验证范围。
+- `pnpm test:signal-hub` 通过，包括服务端 41 个测试及插件、native、logger 回归。新增回归加载真实 forwarder 插件，替换 Discord/IPC 依赖，覆盖 Remote → Local 和 Local → Remote 在重启前保持原模式、Local 等待 native 初始化、Local 不受通知规则限制、保留自己/排除 server 过滤及停止后忽略回调。
+- `pnpm test:ts`、`pnpm build --dev`、`pnpm buildStandalone --dev`、`pnpm buildWebStandalone --dev`、`pnpm fmt:check` 通过；本次修改的 TypeScript 文件在排除既有相对导入/文件头规则的临时检查配置下通过其余风格检查。
+- `pnpm generatePluginJson` 输出恰好 2 个可选插件：`forwarder`、`channel-logger`，均默认启用；另保留 5 个上游必需插件。
+- 完整 `pnpm lint` 仍报告 361 个相对导入错误及 1 个既有 installer 文件头错误，没有将其记为通过。未执行真实消息投递或生产切换。
+
 ## 线上只读核对
 
 使用当前 `createConfigSync` 对 `https://forwarder.yufeng.run` 执行两次完整读取，校验成功并得到 51 条 routes、45 条 enabled、Signal 开启、42 个目标 profiles。读取覆盖所有 routes 分页、Signal 配置和目标 profiles，没有写 CF 配置、读取业务 secret、调用生产 `/forward` 或发送 Discord/模型/钉钉测试消息。

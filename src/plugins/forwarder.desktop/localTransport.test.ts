@@ -3,12 +3,115 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
+
+import { build } from "esbuild";
 
 import { CaptureEnvelope } from "../../../signal-hub/contracts/ingest";
 import { createLocalTransport } from "./localTransport";
 import { localSkipReason, normalizeLegacyMessage } from "./logic";
 
+async function checkPluginModeLifecycle() {
+    const store = {
+        mode: "remote", excludedServerIds: "", logFailures: false,
+        serverUrl: "https://legacy.test/forward", fallbackUrl: "",
+        enableDingTalkAlerts: false, dingTalkWebhookUrl: "",
+        localServerUrl: "http://192.168.1.50:49321/forward",
+        localRuntimeDirectory: "/collector/signal-hub/var", localPairingToken: "test-pairing-token-only",
+    };
+    let notificationsEnabled = true;
+    let configured = 0;
+    let sentRemote = 0;
+    let queuedLocal = 0;
+    let finishConfiguration: () => void = () => { throw new Error("Local configuration has not started"); };
+    const errors: unknown[] = [];
+    const native = {
+        async configureLocal() {
+            configured++;
+            await new Promise<void>(resolve => { finishConfiguration = resolve; });
+        },
+        async stopLocal() {},
+        async enqueueLocal() { queuedLocal++; return { ok: true }; },
+        async send() { sentRemote++; return { ok: true }; },
+    };
+    const mocks: Record<string, unknown> = {
+        "@api/Settings": { definePluginSettings: () => ({ store, use: () => store }) },
+        "@components/Button": { Button() {} },
+        "@components/ErrorBoundary": { default: { wrap: (component: unknown) => component } },
+        "@components/Flex": { Flex() {} },
+        "@components/Heading": { Heading() {} },
+        "@components/Paragraph": { Paragraph() {} },
+        "@utils/constants": { Devs: { iondex: {} } },
+        "@utils/Logger": { Logger: function () { return { error: (...values: unknown[]) => errors.push(values) }; } },
+        "@utils/margins": { Margins: {} },
+        "@utils/types": { default: (plugin: unknown) => plugin, OptionType: { SELECT: 0, STRING: 1, BOOLEAN: 2 } },
+        "@webpack": { findByCodeLazy: () => () => notificationsEnabled },
+        "@webpack/common": {
+            ChannelStore: { getChannel: () => ({ id: "2", guild_id: "4", type: 0, name: "source" }) },
+            GuildStore: { getGuild: () => ({ id: "4", name: "server" }) },
+            UserStore: { getCurrentUser: () => ({ id: "1", username: "collector" }) },
+        },
+    };
+    const bundle = await build({
+        entryPoints: [join(__dirname, "index.tsx")], bundle: true, write: false,
+        platform: "node", format: "cjs", external: ["@*"], jsx: "transform", logLevel: "silent",
+    });
+    const output = { exports: {} as { default: { start(): void; stop(): void; flux: { MESSAGE_CREATE(event: unknown): void; }; }; } };
+    runInNewContext(bundle.outputFiles[0].text, {
+        module: output, VencordNative: { pluginHelpers: { forwarder: native } },
+        require(name: string) {
+            assert.ok(name in mocks, `Unexpected plugin dependency: ${name}`);
+            return { __esModule: true, ...mocks[name] as object };
+        },
+    });
+    const plugin = output.exports.default;
+    const message = { id: "3", channel_id: "2", guild_id: "4", content: "fixture", author: { id: "5", username: "sender" } };
+    const receive = async (authorId = "5") => {
+        plugin.flux.MESSAGE_CREATE({ message: { ...message, author: { ...message.author, id: authorId } } });
+        await new Promise<void>(resolve => setImmediate(resolve));
+    };
+    await receive();
+    assert.equal(sentRemote, 0, "Stopped plugin must ignore callbacks");
+    plugin.start();
+    await receive();
+    assert.equal(sentRemote, 1);
+    store.mode = "local";
+    await receive();
+    assert.equal(sentRemote, 2, "Selecting Local must keep the active Remote transport until restart");
+    assert.equal(configured, 0);
+    assert.equal(queuedLocal, 0);
+    plugin.stop();
+    await receive();
+    assert.equal(sentRemote, 2);
+    plugin.start();
+    assert.equal(configured, 1);
+    store.mode = "remote";
+    notificationsEnabled = false;
+    await receive();
+    assert.equal(queuedLocal, 0, "Local capture waits for native configuration");
+    finishConfiguration();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(queuedLocal, 1, "Selecting Remote must keep Local capture, independent of notification rules");
+    assert.equal(sentRemote, 2);
+    store.excludedServerIds = "4";
+    await receive();
+    store.excludedServerIds = "";
+    await receive("1");
+    assert.equal(queuedLocal, 1, "Mode transitions must preserve excluded-server and self filters");
+    plugin.stop();
+    await receive();
+    assert.equal(queuedLocal, 1);
+    plugin.start();
+    notificationsEnabled = true;
+    await receive();
+    assert.equal(sentRemote, 3);
+    assert.equal(configured, 1);
+    plugin.stop();
+    assert.deepEqual(errors, []);
+}
+
 async function main() {
+    await checkPluginModeLifecycle();
     const directory = mkdtempSync(join(tmpdir(), "forwarder-spool-test-"));
     const event: CaptureEnvelope = {
         schemaVersion: 2, eventId: "discord:1:2:3:create", eventType: "MESSAGE_CREATE", capturedAt: new Date().toISOString(),
