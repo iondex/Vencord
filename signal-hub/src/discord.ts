@@ -96,7 +96,7 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
         const nonce = digest(job.id).slice(0, 24);
         store.transaction(() => {
             store.db.prepare("INSERT OR IGNORE INTO sender_history VALUES(?,?,?,?,?)").run(target.identity, job.target, target.channel.parent_id ?? "", target.channel.guild_id, Date.now());
-            store.db.prepare("INSERT INTO sink_deliveries VALUES(?,?,?,?,?,'intent','',?,?) ON CONFLICT(delivery_key) DO UPDATE SET state='intent',updated_at=excluded.updated_at")
+            store.db.prepare("INSERT INTO sink_deliveries VALUES(?,?,?,?,?,'intent','',?,?) ON CONFLICT(delivery_key) DO UPDATE SET identity=excluded.identity,state='intent',updated_at=excluded.updated_at")
                 .run(job.id, job.id, target.identity, job.target, nonce, Date.now(), Date.now());
             store.db.prepare("UPDATE jobs SET state='sending',lease_until=? WHERE id=?").run(Date.now() + 60_000, job.id);
             store.db.prepare("UPDATE delivery_attempts SET outcome='sending' WHERE id=?").run(attemptId);

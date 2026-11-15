@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { validateSnapshot } from "../src/config.js";
+import { planMessages } from "../src/queue.js";
 import { openStore } from "../src/storage.js";
 
 test("sender identity and unresolved send survive closing, consistent backup and restoring", context => {
@@ -44,4 +46,30 @@ test("delivery audit migration preserves existing jobs and repair counters acros
     store.close();
     store = openStore(path);
     assert.equal((store.db.prepare("SELECT count(*) AS total FROM route_receipts").get() as any).total, 1);
+});
+
+test("admission pin migration preserves legacy messages and assigns fair initial job timestamps", context => {
+    const directory = mkdtempSync(join(tmpdir(), "hub-admission-migration-"));
+    const path = join(directory, "hub.sqlite3");
+    let store = openStore(path);
+    context.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+    const snapshot = validateSnapshot({
+        routes: [{ routeId: "route", enabled: true, serverId: "2", channelId: "3", targetChannelId: "5" }],
+        signal: { enabled: false },
+    });
+    const original = store.installConfig(snapshot);
+    const event = { schemaVersion: 2 as const, eventId: "legacy-admission", eventType: "MESSAGE_CREATE" as const,
+        capturedAt: new Date().toISOString(), accountId: "1", serverId: "2", channelId: "3", excludedServerIds: [], message: { id: "4", content: "saved" } };
+    store.ingest(event, JSON.stringify(event));
+    const job = store.enqueue("discord:2:3:4", "deliver", "route", "5", 0, { content: "saved" }, original.hash);
+    store.db.prepare("UPDATE jobs SET due_at=0 WHERE id=?").run(job);
+    store.db.exec("ALTER TABLE messages DROP COLUMN config_hash");
+    store.close();
+    store = openStore(path);
+    assert.equal((store.db.prepare("SELECT config_hash FROM messages").get() as any).config_hash, original.hash);
+    assert.ok((store.db.prepare("SELECT due_at FROM jobs WHERE id=?").get(job) as any).due_at > 0);
+    store.installConfig({ ...snapshot, routes: [{ ...snapshot.routes[0], targetChannelId: "6" }] });
+    planMessages(store, []);
+    assert.equal((store.db.prepare("SELECT count(*) AS total FROM jobs WHERE target='6'").get() as any).total, 0);
+    assert.equal(JSON.parse((store.db.prepare("SELECT body FROM jobs WHERE id=?").get(job) as any).body).content, "saved");
 });

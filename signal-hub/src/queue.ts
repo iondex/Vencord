@@ -12,12 +12,14 @@ export function safetyState(store: Store, event: CaptureEnvelope, excludedServer
 }
 
 export function planMessages(store: Store, excludedServerIds: string[], limit = 100) {
-    const config = store.config();
     const rows = store.db.prepare("SELECT * FROM messages WHERE state='pending' ORDER BY created_at LIMIT ?").all(limit) as any[];
     const deferred = store.db.prepare("SELECT * FROM messages WHERE state='safety_pending' ORDER BY checked_at,created_at LIMIT ?").all(Math.max(1, Math.floor(limit / 5))) as any[];
     rows.push(...deferred);
+    const configurations = new Map<string, ReturnType<Store["config"]>>();
     for (const row of rows) {
         const event = JSON.parse(row.envelope) as CaptureEnvelope;
+        if (!configurations.has(row.config_hash)) configurations.set(row.config_hash, store.config(row.config_hash || undefined));
+        const config = configurations.get(row.config_hash);
         store.transaction(() => {
             store.db.prepare("UPDATE messages SET checked_at=? WHERE message_key=?").run(Date.now(), row.message_key);
             const routes = config ? matchingRoutes(config.snapshot, event) : [];
@@ -74,7 +76,8 @@ export function executable(store: Store, job: any, excludedServerIds: string[]) 
     const route = config?.snapshot.routes.find(route => route.routeId === job.route_id && route.enabled);
     const safety = safetyState(store, event, excludedServerIds);
     if (safety || !config || !route || !currentConfig || store.metadata("paused") === "true") return undefined;
-    if (!matchingRoutes(currentConfig.snapshot, event).some(match => match.routeId === route.routeId)) return undefined;
+    const currentMatches = matchingRoutes(currentConfig.snapshot, event);
+    if (currentMatches.length !== 1 || currentMatches[0].routeId !== route.routeId) return undefined;
     if ((job.kind === "extract" || job.kind === "signal")
         && (!signalEnabled(currentConfig.snapshot, route.routeId) || !signalEnabled(config.snapshot, route.routeId))) return undefined;
     if (job.kind === "deliver" && job.target !== route.targetChannelId) return undefined;

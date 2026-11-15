@@ -36,6 +36,11 @@ export function openStore(path: string) {
     `);
     const columns = db.prepare("PRAGMA table_info(messages)").all() as any[];
     if (!columns.some(column => column.name === "checked_at")) db.exec("ALTER TABLE messages ADD COLUMN checked_at INTEGER NOT NULL DEFAULT 0");
+    if (!columns.some(column => column.name === "config_hash")) transaction(() => {
+        db.exec("ALTER TABLE messages ADD COLUMN config_hash TEXT NOT NULL DEFAULT ''");
+        db.exec("UPDATE messages SET config_hash=coalesce((SELECT value FROM metadata WHERE key='config_hash'),'')");
+        db.prepare("UPDATE jobs SET due_at=coalesce((SELECT created_at FROM messages WHERE message_key=jobs.message_key),?) WHERE state='pending' AND due_at=0").run(Date.now());
+    });
     db.exec("CREATE INDEX IF NOT EXISTS messages_pending ON messages(state,created_at); CREATE INDEX IF NOT EXISTS messages_deferred ON messages(state,checked_at,created_at)");
     const jobColumns = db.prepare("PRAGMA table_info(jobs)").all() as any[];
     for (const column of ["retry_count", "recovery_cycles"]) {
@@ -78,7 +83,7 @@ export function openStore(path: string) {
             db.prepare("INSERT INTO config_snapshots VALUES(?,?,?) ON CONFLICT(hash) DO UPDATE SET body=excluded.body").run(hash, body, Date.now());
             setMetadata("config_hash", hash);
             setMetadata("config_synced_at", String(syncedAt));
-            db.prepare("UPDATE messages SET state='pending' WHERE state IN ('waiting_config','route_conflict')").run();
+            db.prepare("UPDATE messages SET state='pending',config_hash=? WHERE state IN ('waiting_config','route_conflict') OR (state='pending' AND config_hash='')").run(hash);
             db.prepare("UPDATE jobs SET state='pending' WHERE state='held' AND error IN ('current_safety_or_config_veto','config_changed_during_preflight','config_changed_during_extraction')").run();
         });
         return { hash, body, syncedAt };
@@ -90,7 +95,7 @@ export function openStore(path: string) {
             const existing = db.prepare("SELECT hash FROM receipts WHERE event_id=?").get(envelope.eventId) as any;
             if (existing && existing.hash !== hash) throw new Error("event_id_conflict");
             db.prepare("INSERT OR IGNORE INTO receipts VALUES(?,?,?,?,?)").run(envelope.eventId, hash, raw, Date.now(), key);
-            db.prepare("INSERT OR IGNORE INTO messages(message_key,envelope,created_at) VALUES(?,?,?)").run(key, JSON.stringify(envelope), Date.now());
+            db.prepare("INSERT OR IGNORE INTO messages(message_key,envelope,created_at,config_hash) VALUES(?,?,?,?)").run(key, JSON.stringify(envelope), Date.now(), metadata("config_hash") ?? "");
             return { eventId: envelope.eventId, hash, durable: true, duplicate: Boolean(existing) };
         });
     }
@@ -128,8 +133,8 @@ export function openStore(path: string) {
     }
     function enqueue(key: string, kind: string, routeId: string, target: string, part: number, body: unknown, configHash: string) {
         const jobId = digest(`${key}:${kind}:${routeId}:${target}:${part}`);
-        db.prepare("INSERT OR IGNORE INTO jobs(id,message_key,kind,route_id,target,part,body,config_hash) VALUES(?,?,?,?,?,?,?,?)")
-            .run(jobId, key, kind, routeId, target, part, JSON.stringify(body), configHash);
+        db.prepare("INSERT OR IGNORE INTO jobs(id,message_key,kind,route_id,target,part,body,config_hash,due_at) VALUES(?,?,?,?,?,?,?,?,?)")
+            .run(jobId, key, kind, routeId, target, part, JSON.stringify(body), configHash, Date.now());
         return jobId;
     }
     function recordRoute(key: string, routeId: string, target: string, configHash: string, decision: string) {

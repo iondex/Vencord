@@ -13,6 +13,10 @@ export function createWatchdog(directory: string, webhook: string | undefined, f
     } catch {}
     let failed = 0;
     let working = false;
+    function persistState() {
+        try { writeDurable(statePath, JSON.stringify(state)); }
+        catch { process.stderr.write("signal-hub watchdog state persistence unavailable; notification limits remain in memory\n"); }
+    }
     return async function check(now = Date.now()) {
         if (working) return;
         working = true;
@@ -26,7 +30,7 @@ export function createWatchdog(directory: string, webhook: string | undefined, f
             if (!webhook || now < state.retryAt || (!healthy && failed < 3) || (healthy && !state.alerted)
                 || (!healthy && state.alerted && now - state.lastSentAt < 300_000)) return;
             state.retryAt = now + 30_000;
-            writeDurable(statePath, JSON.stringify(state));
+            persistState();
             try {
                 const content = healthy ? "[signal-hub] Service heartbeat recovered"
                     : state.alerted ? "[signal-hub] Service heartbeat is still missing; check the service host"
@@ -44,7 +48,7 @@ export function createWatchdog(directory: string, webhook: string | undefined, f
                 state.attempts++;
                 state.retryAt = now + Math.min(300_000, 30_000 * 2 ** Math.min(state.attempts - 1, 4));
             }
-            writeDurable(statePath, JSON.stringify(state));
+            persistState();
         } catch { process.stderr.write("signal-hub watchdog state unavailable\n"); }
         finally { working = false; }
     };

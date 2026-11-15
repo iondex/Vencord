@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, TestContext } from "node:test";
@@ -124,6 +124,7 @@ test("health alerts detect overdue ready jobs and only recover when all affected
     state.store.db.prepare("INSERT INTO messages(message_key,envelope,state,created_at) VALUES('source','{}','routed',?)").run(now - 120_000);
     const first = state.store.enqueue("source", "deliver", "route", "target1", 0, {}, "fixture");
     const second = state.store.enqueue("source", "deliver", "route", "target2", 0, {}, "fixture");
+    state.store.db.prepare("UPDATE jobs SET due_at=?").run(now - 120_000);
     refreshHealthAlerts(state.store, now);
     assert.ok((state.store.status().activeAlerts as any[]).some(row => row.code === "delivery_backlog" && row.severity === "critical"));
     state.store.db.prepare("UPDATE jobs SET state='uncertain',error='send_outcome_unknown'").run();
@@ -136,6 +137,36 @@ test("health alerts detect overdue ready jobs and only recover when all affected
     refreshHealthAlerts(state.store, now + 60_000);
     assert.equal((state.store.status().activeAlerts as any[]).some(row => row.code === "delivery_uncertain"), false);
     assert.ok((state.store.status().activeAlerts as any[]).some(row => row.code === "delivery_uncertain_recovered"));
+});
+
+test("lease recovery creates the critical uncertain-outcome alert even if the send process crashed", context => {
+    const state = fixture(context);
+    state.store.db.prepare("INSERT INTO messages(message_key,envelope,state,created_at) VALUES('source','{}','routed',?)").run(Date.now());
+    const job = state.store.enqueue("source", "deliver", "route", "target", 0, {}, "fixture");
+    state.store.db.prepare("UPDATE jobs SET state='sending',lease_until=0 WHERE id=?").run(job);
+    state.store.recoverLeases();
+    refreshHealthAlerts(state.store);
+    assert.ok((state.store.status().activeAlerts as any[]).some(row => row.code === "delivery_uncertain" && row.severity === "critical"));
+    state.store.db.prepare("UPDATE jobs SET state='sent' WHERE id=?").run(job);
+    refreshHealthAlerts(state.store);
+    assert.equal((state.store.status().activeAlerts as any[]).some(row => row.code === "delivery_uncertain"), false);
+});
+
+test("watchdog still notifies with in-memory limits when its state directory cannot be written", async context => {
+    const state = fixture(context);
+    mkdirSync(join(state.directory, "watchdog-state.json"));
+    const check = createWatchdog(state.directory, "https://alert.test", state.fetcher);
+    const now = Date.now();
+    await check(now); await check(now + 30_000); await check(now + 60_000);
+    assert.equal(state.notifications.length, 1);
+    await check(now + 90_000); await check(now + 120_000);
+    assert.equal(state.notifications.length, 1);
+    await check(now + 360_000);
+    assert.equal(state.notifications.length, 2);
+    writeFileSync(join(state.directory, "heartbeat.json"), JSON.stringify({ time: now + 390_000 }));
+    await check(now + 390_000);
+    assert.equal(state.notifications.length, 3);
+    assert.ok(state.notifications[2].includes("recovered"));
 });
 
 test("watchdog persists outage notifications, repeats sustained failures and sends one recovery", async context => {

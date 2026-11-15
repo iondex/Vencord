@@ -19,7 +19,8 @@ export function refreshHealthAlerts(store: Store, now = Date.now()) {
         max(error GLOB 'discord_http_*' AND error!='discord_http_429') AS rejected,
         max(error='signal_extraction_failed') AS extraction FROM jobs
         WHERE state IN ('pending','leased','sending','retry_wait','uncertain','held','dead','review')`).get() as any;
-    if (!outstanding.uncertain) store.resolveAlert("delivery_uncertain");
+    if (outstanding.uncertain) store.alert("delivery_uncertain", "A Discord send has an uncertain outcome; reconciliation is required before retry", "critical");
+    else store.resolveAlert("delivery_uncertain");
     if (!outstanding.exhausted) store.resolveAlert("delivery_retries_exhausted");
     if (!outstanding.safety) store.resolveAlert("discord_safety");
     if (!outstanding.rejected) store.resolveAlert("discord_rejected");

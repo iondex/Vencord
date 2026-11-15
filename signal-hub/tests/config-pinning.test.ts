@@ -66,6 +66,28 @@ test("queued Signal deliveries validate ordinary and index targets against the p
     }
 });
 
+test("messages pin their admission configuration before planning across a refresh", context => {
+    const { store, snapshot, event, delivery } = fixture(context);
+    const pending = { ...event, eventId: "pinning:101", message: { ...event.message, id: "101" } };
+    store.ingest(pending, JSON.stringify(pending));
+    store.installConfig({ ...snapshot, routes: [{ ...snapshot.routes[0], targetChannelId: "8" }] });
+    planMessages(store, []);
+    const job = store.db.prepare("SELECT * FROM jobs WHERE message_key='discord:2:3:101' AND kind='deliver'").get() as any;
+    assert.equal(job.target, "5");
+    assert.equal(job.config_hash, delivery.config_hash);
+    assert.ok(executable(store, job, []));
+});
+
+test("a new overlapping route vetoes already queued delivery and extraction until configuration is repaired", context => {
+    const { store, snapshot, delivery, extraction } = fixture(context);
+    store.installConfig({ ...snapshot, routes: [...snapshot.routes, { ...snapshot.routes[0], routeId: "overlap", targetChannelId: "9" }] });
+    assert.equal(executable(store, delivery, []), undefined);
+    assert.equal(executable(store, extraction, []), undefined);
+    store.installConfig(snapshot);
+    assert.ok(executable(store, delivery, []));
+    assert.ok(executable(store, extraction, []));
+});
+
 test("current route removal, disabling and source selector changes veto pinned work", context => {
     const { store, snapshot, delivery, extraction } = fixture(context);
     const route = snapshot.routes[0];

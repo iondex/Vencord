@@ -133,6 +133,52 @@ test("lost response is uncertain and never blindly resent; durable intent still 
     assert.equal(store.ownOutput(capture("201", { channelId: "5", message: { id: "201", author: { id: "8" } } })), "safety_pending");
 });
 
+test("retrying a rejected webhook through a Bot updates intent identity and remains reconcilable", async context => {
+    const store = fixture(context);
+    store.installConfig(configuration()); ingest(store, capture()); planMessages(store, []);
+    let botNonce = "";
+    const fetcher = (async (input: any, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/users/@me")) return json({ id: "8", bot: true });
+        if (url.endsWith("/channels/5")) return json({ id: "5", guild_id: "2" });
+        if (url.includes("/webhooks/9/") && init?.method !== "POST") return json({ id: "9", channel_id: "5" });
+        if (init?.method === "POST") {
+            if (url.includes("/webhooks/")) return json({ message: "rejected" }, 403);
+            botNonce = JSON.parse(String(init.body)).nonce;
+            throw new Error("connection lost after Bot send");
+        }
+        if (url.includes("/messages?")) return json([{ id: "200", channel_id: "5", nonce: botNonce, author: { id: "8" } }]);
+        throw new Error("unexpected test request");
+    }) as typeof fetch;
+    const webhookSender = createDiscordSender(store, { botToken: "test", webhooks: { "5": "https://discord.com/api/webhooks/9/test-only" } }, [], fetcher);
+    await webhookSender.send(store.claim("deliver"));
+    assert.equal(rows(store, "sink_deliveries")[0].identity, "webhook:9");
+    assert.equal(rows(store, "sink_deliveries")[0].state, "rejected");
+    store.db.prepare("UPDATE jobs SET due_at=0 WHERE state='pending'").run();
+    const botSender = createDiscordSender(store, { botToken: "test" }, [], fetcher);
+    await botSender.send(store.claim("deliver"));
+    assert.equal(rows(store, "sink_deliveries")[0].identity, "bot:8");
+    assert.equal(rows(store, "jobs")[0].state, "uncertain");
+    assert.deepEqual(rows(store, "sender_history").map(row => row.identity).sort(), ["bot:8", "webhook:9"]);
+    await botSender.reconcile();
+    assert.equal(rows(store, "jobs")[0].state, "sent");
+    assert.equal(rows(store, "sink_deliveries")[0].message_id, "200");
+});
+
+test("ready retries and periodic repairs run before subsequently admitted fresh work", context => {
+    const store = fixture(context);
+    store.installConfig(configuration()); ingest(store, capture()); planMessages(store, []);
+    const first = store.claim("deliver");
+    store.retryDelivery(first.id, "test rejection");
+    store.db.prepare("UPDATE jobs SET due_at=? WHERE id=?").run(Date.now() - 1000, first.id);
+    for (const id of ["101", "102", "103"]) ingest(store, capture(id));
+    planMessages(store, []);
+    assert.equal(store.claim("deliver").id, first.id);
+    store.db.prepare("UPDATE jobs SET state='retry_wait',due_at=? WHERE id=?").run(Date.now() - 500, first.id);
+    assert.equal(store.recoverDeliveries(), 1);
+    assert.equal(store.claim("deliver").id, first.id);
+});
+
 test("lease recovery differentiates work before and during external send", context => {
     const store = fixture(context);
     store.installConfig(configuration()); ingest(store, capture()); planMessages(store, []);
