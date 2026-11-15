@@ -6,6 +6,7 @@
 
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
+import ErrorBoundary from "@components/ErrorBoundary";
 import { Flex } from "@components/Flex";
 import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
@@ -17,11 +18,12 @@ import type { MessageJSON } from "@vencord/discord-types";
 import { findByCodeLazy } from "@webpack";
 import { ChannelStore, GuildStore, showToast, UserStore, useState } from "@webpack/common";
 
-import { createForwarderStats, createHealthUrl, getForwardSkipReason } from "./logic";
+import { jsonSafe } from "../../../signal-hub/contracts/ingest";
+import { createForwarderStats, createHealthUrl, getForwardSkipReason, localSkipReason, normalizeLegacyMessage } from "./logic";
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:49321/forward";
 const DEFAULT_FALLBACK_URL = "https://forwarder.yufeng.run/forward";
-const DEFAULT_DINGTALK_WEBHOOK_URL = "https://oapi.dingtalk.com/robot/send?access_token=e0fe70990df43fd76e3a6ed34facbdc91fe8db1dfbd152514d4f65cd86b43dd6";
+const DEFAULT_DINGTALK_WEBHOOK_URL = "";
 
 const logger = new Logger("forwarder");
 const Native = VencordNative.pluginHelpers.forwarder as PluginNative<typeof import("./native")>;
@@ -29,6 +31,36 @@ const notificationsShouldNotify = findByCodeLazy(".SUPPRESS_NOTIFICATIONS))retur
 const stats = createForwarderStats();
 
 const settings = definePluginSettings({
+    mode: {
+        type: OptionType.SELECT,
+        description: "Remote uses notification rules; local captures server messages to signal-hub",
+        options: [{ label: "Remote", value: "remote", default: true }, { label: "Local", value: "local" }],
+        restartNeeded: true,
+    },
+    localServerUrl: {
+        type: OptionType.STRING,
+        description: "Signal-hub ingestion URL on this computer or a LAN machine",
+        default: "http://127.0.0.1:49321/forward",
+        restartNeeded: true,
+    },
+    localRuntimeDirectory: {
+        type: OptionType.STRING,
+        description: "Absolute signal-hub/var directory on THIS computer, used for the durable sender queue",
+        default: "",
+        restartNeeded: true,
+    },
+    localPairingToken: {
+        type: OptionType.STRING,
+        description: "Pairing token created by signal-hub init (at least 24 characters)",
+        default: "",
+        restartNeeded: true,
+    },
+    excludedServerIds: {
+        type: OptionType.STRING,
+        description: "Optional excluded Discord server IDs, separated by commas; apply the same list to signal-hub",
+        default: "",
+        restartNeeded: true,
+    },
     serverUrl: {
         type: OptionType.STRING,
         description: "HTTP endpoint to forward notification messages to",
@@ -42,7 +74,7 @@ const settings = definePluginSettings({
     enableDingTalkAlerts: {
         type: OptionType.BOOLEAN,
         description: "Send one DingTalk alert after both primary and fallback delivery fail",
-        default: true,
+        default: false,
     },
     dingTalkWebhookUrl: {
         type: OptionType.STRING,
@@ -89,7 +121,7 @@ function compactUser(user: any) {
     return sanitizeForJson({
         id: user.id,
         username: user.username,
-        globalName: user.globalName ?? user.global_name,
+        globalName: user.globalName ?? user.global_name ?? "",
         discriminator: user.discriminator,
         bot: user.bot,
         system: user.system,
@@ -98,15 +130,15 @@ function compactUser(user: any) {
 }
 
 function normalizeAttachment(attachment: any) {
-    const proxyUrl = attachment.proxy_url ?? attachment.proxyUrl ?? null;
-    const url = attachment.url ?? null;
+    const proxyUrl = attachment.proxy_url ?? attachment.proxyUrl ?? undefined;
+    const url = attachment.url ?? "";
     const downloadUrl = proxyUrl ?? url;
 
     return sanitizeForJson({
         id: attachment.id,
         filename: attachment.filename,
         size: attachment.size,
-        contentType: attachment.content_type ?? attachment.contentType ?? null,
+        contentType: attachment.content_type ?? attachment.contentType ?? undefined,
         spoiler: attachment.spoiler,
         width: attachment.width,
         height: attachment.height,
@@ -221,7 +253,7 @@ function createPayload(message: ForwarderMessage) {
                 }
                 : null
         },
-        message: {
+        message: normalizeLegacyMessage({
             id: message.id,
             channelId: message.channel_id,
             guildId,
@@ -241,8 +273,36 @@ function createPayload(message: ForwarderMessage) {
             components: message.components ?? [],
             referencedMessage: message.referenced_message ?? null,
             raw: rawMessage
-        }
+        })
     });
+}
+
+let localReady: Promise<unknown> | undefined;
+
+async function forwardLocal(message: ForwarderMessage, optimistic?: boolean) {
+    const channel = message?.channel_id ? ChannelStore.getChannel(message.channel_id) : null;
+    const parent = channel?.parent_id ? ChannelStore.getChannel(channel.parent_id) : null;
+    const context = { guild_id: channel?.guild_id || parent?.guild_id, type: channel?.type };
+    const accountId = UserStore.getCurrentUser()?.id;
+    const excludedServerIds = settings.store.excludedServerIds.split(/[\s,]+/).filter(Boolean);
+    const reason = localSkipReason(message, context, accountId, optimistic, excludedServerIds);
+    if (reason) return;
+    const serverId = message.guild_id || context?.guild_id;
+    const envelope = jsonSafe({
+        schemaVersion: 2,
+        eventId: `discord:${accountId}:${message.channel_id}:${message.id}:create`,
+        eventType: "MESSAGE_CREATE",
+        capturedAt: new Date().toISOString(),
+        accountId,
+        serverId,
+        channelId: message.channel_id,
+        parentChannelId: channel?.parent_id,
+        excludedServerIds,
+        message,
+    });
+    await localReady;
+    const result = await Native.enqueueLocal(envelope);
+    stats.recordForwardAttempt(result.ok);
 }
 
 async function forwardMessage(message: ForwarderMessage) {
@@ -303,7 +363,41 @@ function HealthLine({ label, health }: { label: string; health: HealthCheckState
     );
 }
 
+function LocalTransportSettings() {
+    const [status, setStatus] = useState<Awaited<ReturnType<typeof Native.localStatus>> | null>(null);
+    const [health, setHealth] = useState<HealthCheckState>({ status: "idle", message: "Health check has not run yet." });
+    const refresh = async () => {
+        try { setStatus(await Native.localStatus()); } catch { logger.error("Cannot read native sender status"); }
+    };
+    const check = async () => {
+        try {
+            const result = await checkHealth(settings.store.localServerUrl);
+            setHealth({ status: result.ok ? "ok" : "error", message: `HTTP ${result.status}` });
+        } catch { setHealth({ status: "error", message: "Signal-hub is unreachable; queued messages remain on disk" }); }
+    };
+    return (
+        <Flex flexDirection="column" gap="8px">
+            <Paragraph>Local mode captures server messages after self and excluded-server filtering. Signal-hub archives and routes them. The runtime directory belongs to this computer, including when the service runs on another LAN machine.</Paragraph>
+            <Flex gap="8px">
+                <Button onClick={refresh}>Refresh sender status</Button>
+                <Button onClick={check}>Check signal-hub</Button>
+            </Flex>
+            <HealthLine label="Signal-hub" health={health} />
+            {status && <>
+                <Paragraph>{status.active ? "Sender active" : "Sender inactive"}{status.lastError ? `: ${status.lastError}` : ""}</Paragraph>
+                <StatsLine label="Pending durable handoff" value={status.pending} />
+                <StatsLine label="Staged records awaiting recovery" value={status.staged} />
+                <StatsLine label="Durably acknowledged by signal-hub" value={status.acked} />
+                <StatsLine label="Quarantined records" value={status.quarantined} />
+                <StatsLine label="Consecutive handoff failures" value={status.consecutiveFailures} />
+                <Paragraph>Oldest pending: {status.oldestPendingAt === null ? "none" : new Date(status.oldestPendingAt).toLocaleString()}. Last durable ACK: {status.lastAcknowledgedAt === null ? "none this session" : new Date(status.lastAcknowledgedAt).toLocaleString()}.</Paragraph>
+            </>}
+        </Flex>
+    );
+}
+
 function ForwarderSettings() {
+    if (settings.store.mode === "local") return <LocalTransportSettings />;
     const [primaryHealth, setPrimaryHealth] = useState<HealthCheckState>({
         status: "idle",
         message: "Health check has not run yet."
@@ -387,7 +481,7 @@ function ForwarderSettings() {
                     <StatsLine label="Forwarded" value={statsSnapshot.forwarded} />
                     <StatsLine label="Failed" value={statsSnapshot.failed} />
                     <StatsLine label="Skipped self messages" value={statsSnapshot.filteredSelf} />
-                    <StatsLine label="Skipped non-guild notifications" value={statsSnapshot.filteredNonGuild} />
+                    <StatsLine label="Skipped non-server notifications" value={statsSnapshot.filteredNonGuild} />
                     <StatsLine label="Skipped by Discord notification rules" value={statsSnapshot.filteredDiscord} />
                 </Flex>
             </div>
@@ -397,18 +491,44 @@ function ForwarderSettings() {
 
 export default definePlugin({
     name: "forwarder",
+    enabledByDefault: true,
     description: "Forwards Discord notification messages with metadata to a configurable HTTP server.",
     authors: [Devs.iondex],
     tags: ["Notifications", "Utility"],
     settings,
 
+    start() {
+        if (settings.store.mode !== "local") return;
+        localReady = Native.configureLocal({
+            url: settings.store.localServerUrl.trim(),
+            runtimeDirectory: settings.store.localRuntimeDirectory.trim(),
+            token: settings.store.localPairingToken.trim(),
+        });
+        void localReady.catch(() => logger.error("Local handoff configuration failed; check URL, runtime directory and pairing token"));
+    },
+
+    stop() {
+        localReady = undefined;
+        void Native.stopLocal().catch(() => logger.error("Unable to stop local sender"));
+    },
+
     flux: {
         MESSAGE_CREATE({ message, optimistic }: { message: ForwarderMessage; optimistic?: boolean; }) {
-            if (!shouldForward(message, optimistic)) return;
-
-            void forwardMessage(message);
+            void (async () => {
+                if (settings.store.mode === "local") {
+                    await forwardLocal(message, optimistic);
+                } else if (shouldForward(message, optimistic)) {
+                    const channel = ChannelStore.getChannel(message.channel_id);
+                    const serverId = message.guild_id || channel?.guild_id;
+                    if (settings.store.excludedServerIds.split(/[\s,]+/).includes(serverId ?? "")) return;
+                    await forwardMessage(message);
+                }
+            })().catch(() => {
+                stats.recordForwardAttempt(false);
+                logger.error("Message handoff failed; inspect forwarder configuration and native queue status");
+            });
         }
     },
 
-    settingsAboutComponent: ForwarderSettings
+    settingsAboutComponent: ErrorBoundary.wrap(ForwarderSettings, { noop: false })
 });

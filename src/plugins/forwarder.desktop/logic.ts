@@ -21,7 +21,7 @@ export interface ForwarderStats {
     snapshot(): ForwarderStatsSnapshot;
 }
 
-interface ForwardableMessage {
+export interface ForwardableMessage {
     id?: string;
     channel_id?: string;
     guild_id?: string | null;
@@ -29,6 +29,18 @@ interface ForwardableMessage {
         id?: string;
     } | null;
 }
+
+export function localSkipReason(message: ForwardableMessage | null, channel: ForwardableChannel | null, currentUserId: string | undefined, optimistic: boolean | undefined, excludedServerIds: string[]) {
+    if (optimistic || !message?.id || !message.channel_id || !currentUserId) return "invalid";
+    if (message.author?.id === currentUserId) return "self";
+    if (channel?.type === 1 || channel?.type === 3) return "non-server";
+    const serverId = message.guild_id || channel?.guild_id;
+    if (!serverId) return "non-server";
+    if (excludedServerIds.includes(serverId)) return "excluded-server";
+    return null;
+}
+
+export { normalizeLegacyMessage } from "../../../signal-hub/contracts/legacy";
 
 interface ForwardableChannel {
     guild_id?: string | null;

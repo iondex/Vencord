@@ -4,9 +4,15 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import assert from "assert/strict";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { ForwardDependencies, ForwardRequest, get, sendWithResilience } from "./native";
+import { configureLocal, enqueueLocal, ForwardDependencies, ForwardRequest, get, localStatus, sendWithResilience, stopLocal } from "./native";
 
 function response(status: number, body: string, statusText = "") {
     return new Response(body, {
@@ -261,6 +267,70 @@ async function main() {
         globalThis.fetch = originalFetch;
     }
 }
+
+{
+    const directory = mkdtempSync(join(tmpdir(), "forwarder-lifecycle-test-"));
+    let releaseResponse!: () => void;
+    const responseReady = new Promise<void>(resolve => { releaseResponse = resolve; });
+    let receiveRequest!: () => void;
+    const requestReceived = new Promise<void>(resolve => { receiveRequest = resolve; });
+    const server = createServer(async (incoming, outgoing) => {
+        incoming.setEncoding("utf8");
+        let body = "";
+        for await (const chunk of incoming) body += chunk;
+        receiveRequest();
+        await responseReady;
+        outgoing.end(JSON.stringify({
+            eventId: JSON.parse(body).eventId,
+            hash: createHash("sha256").update(body).digest("hex"),
+            durable: true,
+        }));
+    });
+    try {
+        server.listen(0, "127.0.0.1");
+        await once(server, "listening");
+        const address = server.address();
+        assert.ok(address && typeof address !== "string");
+        const options = {
+            url: `http://127.0.0.1:${address.port}/forward`,
+            runtimeDirectory: directory,
+            token: "pairing-token-for-test-only",
+        };
+        await configureLocal(null as never, options);
+        enqueueLocal(null as never, {
+            schemaVersion: 2, eventId: "lifecycle:create", eventType: "MESSAGE_CREATE", capturedAt: new Date().toISOString(),
+            accountId: "1", serverId: "2", channelId: "3", excludedServerIds: [], message: { id: "4", content: "test" },
+        });
+        await requestReceived;
+        const configuring = configureLocal(null as never, options);
+        const stopping = stopLocal(null as never);
+        releaseResponse();
+        assert.equal((await configuring).ok, false);
+        await stopping;
+        assert.equal(localStatus(null as never).active, false);
+
+        const superseded = configureLocal(null as never, { ...options, token: "invalid" });
+        const latest = configureLocal(null as never, options);
+        assert.equal((await superseded).ok, false);
+        assert.equal((await latest).ok, true);
+        assert.equal(localStatus(null as never).active, true);
+    } finally {
+        releaseResponse();
+        await stopLocal(null as never);
+        await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
+        rmSync(directory, { recursive: true, force: true });
+    }
+}
 }
 
-void main();
+void main().then(async () => {
+    const { dependencies, sleeps } = createDependencies((async () => new Response(JSON.stringify({
+        error: "invalid json", issues: [{ path: ["message", "attachments", 0, "proxyUrl"], message: "private-message-must-not-be-logged" }],
+    }), { status: 400, headers: { "cf-ray": "test-ray" } })) as typeof fetch);
+    const result = await sendWithResilience(null as never, request({ fallbackUrl: "" }), dependencies);
+    assert.equal(result.ok, false);
+    assert.equal(result.attempts?.length, 1);
+    assert.deepEqual(sleeps, []);
+    assert.match(result.attempts?.[0].body ?? "", /message.attachments.0.proxyUrl/);
+    assert.doesNotMatch(JSON.stringify(result.attempts), /private-message-must-not-be-logged/);
+}).catch(error => { console.error(error); process.exitCode = 1; });

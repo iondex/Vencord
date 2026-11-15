@@ -6,6 +6,24 @@
 
 import type { IpcMainInvokeEvent } from "electron";
 
+import { CaptureEnvelope } from "../../../signal-hub/contracts/ingest";
+import { createLocalTransport, LocalOptions } from "./localTransport";
+
+const localTransport = createLocalTransport();
+let localRequestGeneration = 0;
+export async function configureLocal(_: IpcMainInvokeEvent, options: LocalOptions) {
+    const requestGeneration = ++localRequestGeneration;
+    await localTransport.stop();
+    if (requestGeneration !== localRequestGeneration) return { ok: false };
+    return localTransport.configure(options);
+}
+export function enqueueLocal(_: IpcMainInvokeEvent, event: CaptureEnvelope) { return localTransport.enqueue(event); }
+export function localStatus(_: IpcMainInvokeEvent) { return localTransport.status(); }
+export function stopLocal(_: IpcMainInvokeEvent) {
+    localRequestGeneration++;
+    return localTransport.stop();
+}
+
 const MAX_ATTEMPTS = 5;
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 5000] as const;
 const MAX_BODY_LENGTH = 2000;
@@ -247,7 +265,16 @@ async function attemptEndpoint(
                 signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
             });
             const responseBody = await response.text();
-            const body = response.ok ? excerpt(responseBody) : undefined;
+            let body = response.ok ? excerpt(responseBody) : undefined;
+            if (!response.ok) {
+                try {
+                    const detail = JSON.parse(responseBody);
+                    const code = typeof detail.error === "string" && /^[a-z0-9_ .-]{1,80}$/i.test(detail.error) ? detail.error : "http_error";
+                    const fields = Array.isArray(detail.issues) ? detail.issues.slice(0, 12).map((issue: any) => Array.isArray(issue.path)
+                        ? issue.path.filter((part: unknown) => typeof part === "number" || (typeof part === "string" && /^[\w-]{1,40}$/.test(part))).join(".") : "").filter(Boolean) : [];
+                    body = JSON.stringify({ code, fields, rayId: response.headers.get("cf-ray") ?? undefined });
+                } catch {}
+            }
             const diagnostic: AttemptDiagnostic = {
                 role,
                 url: redactUrl(target.toString()),
@@ -264,6 +291,7 @@ async function attemptEndpoint(
             attempts.push(diagnostic);
 
             if (response.ok) return { ok: true as const, status: response.status, body: body ?? "", attempts };
+            if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status)) break;
         } catch (error) {
             const serializedError = serializeError(error);
             attempts.push({
