@@ -23,6 +23,7 @@ import { join, sep } from "path";
 import { normalize as posixNormalize, sep as posixSep } from "path/posix";
 import { BigIntLiteral, createSourceFile, Identifier, isArrayLiteralExpression, isCallExpression, isExportAssignment, isIdentifier, isObjectLiteralExpression, isPropertyAccessExpression, isPropertyAssignment, isSatisfiesExpression, isStringLiteral, isVariableStatement, NamedDeclaration, NodeArray, ObjectLiteralExpression, ScriptTarget, StringLiteral, SyntaxKind } from "typescript";
 
+import { includePlugin } from "./build/pluginProfile.mjs";
 import { getPluginTarget } from "./utils.mjs";
 
 interface Dev {
@@ -215,7 +216,7 @@ function isPluginFile({ name }: { name: string; }) {
 
     await Promise.all(["src/plugins", "src/plugins/_core"].flatMap(dir =>
         readdirSync(dir, { withFileTypes: true })
-            .filter(isPluginFile)
+            .filter(file => isPluginFile(file) && includePlugin(dir, file.name))
             .map(async dirent => {
                 const [data, readme] = await parseFile(await getEntryPoint(dir, dirent));
                 plugins.push(data);

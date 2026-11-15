@@ -1,0 +1,6 @@
+{
+    "plugins": [
+        { "directory": "forwarder.desktop", "name": "forwarder" },
+        { "directory": "channel-logger.desktop", "name": "channel-logger" }
+    ]
+}

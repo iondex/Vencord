@@ -23,6 +23,7 @@ import { readdir } from "fs/promises";
 import { join, resolve } from "path";
 
 import { BUILD_TIMESTAMP, buildOrWatchAll, commonOpts, commonRendererPlugins, exists, getMonacoEditorCdnUrl,globPlugins, IS_ANTI_CRASH_TEST, IS_DEV, IS_REPORTER, IS_STANDALONE, IS_UPDATER_DISABLED, resolvePluginName, stringifyValues, VERSION, watch } from "./common.mjs";
+import { includePlugin, pluginProfilePath } from "./pluginProfile.mjs";
 
 const defines = stringifyValues({
     IS_STANDALONE,
@@ -82,13 +83,14 @@ const globNativesPlugin = {
             /**
              * @type {string[]}
              */
-            const watchFiles = [];
+            const watchFiles = [pluginProfilePath.pathname];
             for (const dir of pluginDirs) {
                 const dirPath = join("src", dir);
                 if (!await exists(dirPath)) continue;
                 const plugins = await readdir(dirPath, { withFileTypes: true });
                 for (const file of plugins) {
                     const fileName = file.name;
+                    if (!includePlugin(dir, fileName)) continue;
                     const nativePath = join(dirPath, fileName, "native.ts");
                     const indexNativePath = join(dirPath, fileName, "native/index.ts");
 

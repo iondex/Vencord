@@ -32,6 +32,7 @@ import { optimize as optimizeSvg } from "svgo";
 import { promisify } from "util";
 
 import { getPluginTarget } from "../utils.mjs";
+import { includePlugin, pluginProfilePath } from "./pluginProfile.mjs";
 
 /** @type {import("../../package.json")} */
 const PackageJSON = JSON.parse(readFileSync("package.json", "utf-8"));
@@ -173,6 +174,7 @@ export const globPlugins = kind => ({
                 const files = await readdir(fullDir, { withFileTypes: true });
                 for (const file of files) {
                     const fileName = file.name;
+                    if (!includePlugin(dir, fileName)) continue;
                     if (fileName.startsWith("_") || fileName.startsWith(".")) continue;
                     if (fileName === "index.ts") continue;
 
@@ -208,6 +210,7 @@ export const globPlugins = kind => ({
                 contents: code,
                 resolveDir: "./src",
                 watchDirs: pluginDirs.map(d => resolve("src", d)),
+                watchFiles: [pluginProfilePath.pathname],
             };
         });
     }

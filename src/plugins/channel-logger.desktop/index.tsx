@@ -5,7 +5,7 @@
  */
 
 import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/ContextMenu";
-import { definePluginSettings } from "@api/Settings";
+import { definePluginSettings, migratePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { Flex } from "@components/Flex";
 import { Heading } from "@components/Heading";
@@ -47,8 +47,10 @@ import {
 } from "./logic";
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:49322";
-const pluginLogger = new Logger("ChannelLogger");
-const Native = VencordNative.pluginHelpers.ChannelLogger as PluginNative<typeof import("./native")>;
+const pluginLogger = new Logger("channel-logger");
+const Native = VencordNative.pluginHelpers["channel-logger"] as PluginNative<typeof import("./native")>;
+
+migratePluginSettings("channel-logger", "ChannelLogger", "channellogger");
 
 let enabledChannelIds = new Set<string>();
 const closingChannels = new Map<string, EnabledChannelLogger>();
@@ -456,7 +458,8 @@ function LoggerSettings() {
 }
 
 export default definePlugin({
-    name: "ChannelLogger",
+    name: "channel-logger",
+    enabledByDefault: true,
     description: "Logs messages loaded while viewing selected server channels to a local service.",
     authors: [Devs.iondex],
     tags: ["Chat", "Servers", "Utility"],

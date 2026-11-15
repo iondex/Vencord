@@ -207,7 +207,7 @@ async function streamDownload(
         }
         messageCursor = page.nextCursor;
     } while (messageCursor != null);
-    await writeChunk(response, `],"messageVersions":[`);
+    await writeChunk(response, "],\"messageVersions\":[");
     separator = "";
     let versionCursor: VersionCursor | null = null;
     do {
@@ -218,7 +218,7 @@ async function streamDownload(
         }
         versionCursor = page.nextCursor;
     } while (versionCursor != null);
-    await writeChunk(response, `],"messageEvents":[`);
+    await writeChunk(response, "],\"messageEvents\":[");
     separator = "";
     let eventCursor: EventCursor | null = null;
     do {
