@@ -101,6 +101,8 @@
 
 私密 JSON 有 Bot token、33 个目标 Webhook；CF token、模型 API key 和钉钉 Webhook 均为空。当前进程环境也未发现这些模型、CF 和钉钉覆盖项，有代理变量。文件修改早于进程启动，结合代码加载路径与数据库故障，模型和通知的配置缺失有明确依据；未输出任何值。
 
+21:44:23 追加静态覆盖核对：45 条启用 route 对应 31 个不同目标，全部配置了自定义名称或头像，因此发送时需要 Webhook。其中 `Cblast-1k` 的目标 `1527702496976441484` 缺少 Webhook。该 route 当前没有投递记录，因此尚未表现为积压，但有新消息时会被 `missing_discord_webhook` 拦下并进入修复流程；不能因 Bot token 存在就认为它可以自动改用 Bot 发送。其余启用目标已配置 Webhook，这只证明配置存在，不替代其有效性及实际目标权限验证。应优先补齐或修复该目标身份，不通过删除 profile 静默改变发送身份。
+
 Signal：两项 extract 任务，其中一项 `review/stale_signal`，尝试 19 次；另一项 `retry_wait/signal_extraction_failed`，最终快照尝试 18 次。没有已保存的解析结果。代码在没有模型 key 时直接报错，并统一记录 `signal_extraction_failed`；超过 15 分钟的任务进入 review，不应自动作为实时交易信号重发。普通原文投递仍继续。
 
 钉钉：5 个 active 告警（delivery_uncertain、delivery_retries_exhausted、history_coverage_degraded、delivery_attention、signal_extraction）均为发送时间 0、尝试 0，通知调度元数据为空。当前没有钉钉通知生效的证据，且实际未配置。`delivery_retries_exhausted` 涉及的未完成任务是 extract，并不表示还有普通转发任务不断重试。严重故障不能只依赖当前未配置的通知链路。
@@ -109,7 +111,7 @@ Signal：两项 extract 任务，其中一项 `review/stale_signal`，尝试 19 
 
 ## 后续优先级
 
-1. 先建立可用的 Signal 模型凭据和钉钉配置，按既有合并、严重故障越过普通冷却、持续提醒策略验证通知。凭据须只写私密运行配置；本轮不代用户修改或重启生产进程。
+1. 先补齐 Cblast-1k 的目标 Webhook、Signal 模型凭据和钉钉配置，按既有合并、严重故障越过普通冷却、持续提醒策略验证通知。凭据须只写私密运行配置；本轮不代用户修改或重启生产进程。
 2. 对三条 Webhook uncertain 建立有证据和操作审计的对账/恢复流程，避免永久停留与盲重发两种风险；增加发送阶段安全错误分类，保持日志无正文/凭据。
 3. 分开统计普通投递、Signal 提取与 CF 交接的队列和告警，避免单一 queued 数字隐藏 extract 重试，也避免将发送尝试成功率称为消息送达率。
 4. 配置显式来源历史补采和独立进程 watchdog，确认其权限、覆盖窗口及通知凭据；同时保留采集端磁盘失败的本地严重提示。

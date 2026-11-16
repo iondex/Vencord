@@ -585,6 +585,21 @@
         ]
     },
     "details": {
+        "identityCoverage": {
+            "observedAt": 1794836663249,
+            "enabledRoutes": 45,
+            "distinctEnabledTargets": 31,
+            "routesRequiringWebhook": 45,
+            "missingRequiredWebhook": [
+                {
+                    "name": "Cblast-1k",
+                    "target": "1527702496976441484",
+                    "identityRequired": true,
+                    "webhookConfigured": false
+                }
+            ],
+            "botFallbackRoutes": []
+        },
         "observedAt": 1794835836452,
         "uncertain": [
             {
