@@ -72,7 +72,7 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
                     renameSync(path, join(directory, "quarantine", file));
                     syncDirectory(join(directory, "quarantine"));
                     syncDirectory(join(directory, "pending"));
-                    lastError = "Invalid persisted capture moved to quarantine";
+                    lastError = "持久化消息格式无效，已移至隔离区";
                     continue;
                 }
                 const hash = createHash("sha256").update(body).digest("hex");
@@ -88,7 +88,7 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
                     renameSync(path, join(directory, "quarantine", file));
                     syncDirectory(join(directory, "quarantine"));
                     syncDirectory(join(directory, "pending"));
-                    lastError = `Signal-hub rejected a capture (HTTP ${response.status}); retained in quarantine`;
+                    lastError = `Signal-hub 拒绝接收消息（HTTP ${response.status}），记录已保留在隔离区`;
                     continue;
                 }
                 if (!response.ok) throw new Error(`Signal-hub ingestion HTTP ${response.status}`);
@@ -105,7 +105,7 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
             if (!readdirSync(join(directory, "quarantine")).length) lastError = null;
         })().catch(() => {
             failures++;
-            lastError = "Signal-hub handoff failed; pending messages remain on disk";
+            lastError = "交接给 Signal-hub 失败，待发送消息仍保存在磁盘中";
         }).finally(() => {
             sending = undefined;
             schedule(failures ? Math.min(30_000, 500 * 2 ** Math.min(failures, 6)) * (0.8 + Math.random() * 0.4) : 250);
@@ -172,6 +172,7 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
                 active, pending: count("pending"), staged: pendingFiles.filter(file => file.endsWith(".tmp")).length,
                 acked: count("acked"), quarantined: options ? readdirSync(join(root(), "quarantine")).length : 0,
                 oldestPendingAt, lastAttemptAt, lastAcknowledgedAt, consecutiveFailures: failures, lastError,
+                runtimeDirectory: options?.runtimeDirectory ?? null,
             };
         },
         async stop() {

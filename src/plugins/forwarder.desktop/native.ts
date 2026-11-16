@@ -4,24 +4,70 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { join, resolve } from "node:path";
+
 import type { IpcMainInvokeEvent } from "electron";
 
-import { CaptureEnvelope } from "../../../signal-hub/contracts/ingest";
+import type { LocalRouteTest, LocalServiceStatus } from "../../../signal-hub/contracts/diagnostics";
+import { CaptureEnvelope, validateServiceUrl } from "../../../signal-hub/contracts/ingest";
 import { createLocalTransport, LocalOptions } from "./localTransport";
 
 const localTransport = createLocalTransport();
 let localRequestGeneration = 0;
-export async function configureLocal(_: IpcMainInvokeEvent, options: LocalOptions) {
+export async function configureLocal(_: IpcMainInvokeEvent, options: Omit<LocalOptions, "runtimeDirectory"> & { runtimeDirectory?: string; }) {
     const requestGeneration = ++localRequestGeneration;
     await localTransport.stop();
     if (requestGeneration !== localRequestGeneration) return { ok: false };
-    return localTransport.configure(options);
+    return localTransport.configure({
+        ...options,
+        runtimeDirectory: options.runtimeDirectory || join(process.env.VENCORD_USER_DATA_DIR || resolve(__dirname, ".."), "signal-hub", "var"),
+    });
 }
 export function enqueueLocal(_: IpcMainInvokeEvent, event: CaptureEnvelope) { return localTransport.enqueue(event); }
 export function localStatus(_: IpcMainInvokeEvent) { return localTransport.status(); }
 export function stopLocal(_: IpcMainInvokeEvent) {
     localRequestGeneration++;
     return localTransport.stop();
+}
+
+interface LocalConnection { url: string; token: string; }
+type LocalApiResult<T> = { ok: true; data: T; } | { ok: false; message: string; };
+
+async function localApi<T>(connection: LocalConnection, path: string, input?: unknown): Promise<LocalApiResult<T>> {
+    try {
+        const url = validateServiceUrl(connection.url);
+        url.pathname = path;
+        url.search = "";
+        const response = await fetch(url, {
+            method: input === undefined ? "GET" : "POST",
+            headers: { "Content-Type": "application/json", ...(connection.token ? { Authorization: `Bearer ${connection.token}` } : {}) },
+            body: input === undefined ? undefined : JSON.stringify(input),
+            redirect: "error", signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok) {
+            const messages: Record<number, string> = { 401: "连接令牌不正确", 403: "服务拒绝访问", 404: "接口或路由不存在，请确认服务已更新", 409: "服务已暂停或测试编号冲突", 422: "路由已停用或来源服务器被排除" };
+            return { ok: false, message: messages[response.status] ?? `服务返回 HTTP ${response.status}` };
+        }
+        return { ok: true, data: await response.json() as T };
+    } catch { return { ok: false, message: "无法访问本地服务，请检查地址、网络和服务进程" }; }
+}
+
+export async function checkLocalService(_: IpcMainInvokeEvent, connection: LocalConnection) {
+    const result = await localApi<LocalServiceStatus>(connection, "/api/local/status");
+    if (result.ok && (result.data?.service !== "signal-hub" || result.data.protocol !== 2 || !Array.isArray(result.data.routes)
+        || !Array.isArray(result.data.jobs) || typeof result.data.paused !== "boolean")) {
+        return { ok: false as const, message: "响应不是兼容的 Signal-hub 本地服务" };
+    }
+    return result;
+}
+
+export function testLocalRoute(_: IpcMainInvokeEvent, connection: LocalConnection, routeId: string, requestId: string) {
+    return localApi<LocalRouteTest>(connection, "/api/local/test", { routeId, requestId });
+}
+
+export function localTestStatus(_: IpcMainInvokeEvent, connection: LocalConnection, requestId: string) {
+    if (!/^[a-f\d-]{36}$/.test(requestId)) return Promise.resolve({ ok: false as const, message: "测试编号无效" });
+    return localApi<LocalRouteTest>(connection, `/api/local/tests/${requestId}`);
 }
 
 const MAX_ATTEMPTS = 5;

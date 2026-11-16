@@ -10,14 +10,17 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Flex } from "@components/Flex";
 import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
+import { OptionComponentMap } from "@components/settings/tabs/plugins/components";
 import { Devs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import { Margins } from "@utils/margins";
-import definePlugin, { OptionType, PluginNative } from "@utils/types";
+import definePlugin, { OptionType, PluginNative, PluginSettingComponentProps } from "@utils/types";
 import type { MessageJSON } from "@vencord/discord-types";
 import { findByCodeLazy } from "@webpack";
-import { ChannelStore, GuildStore, showToast, UserStore, useState } from "@webpack/common";
+import { ChannelStore, GuildStore, Select, showToast, TabBar, useEffect, UserStore, useState } from "@webpack/common";
+import type { ReactNode } from "react";
 
+import type { LocalRouteTest, LocalServiceStatus } from "../../../signal-hub/contracts/diagnostics";
 import { jsonSafe } from "../../../signal-hub/contracts/ingest";
 import { createForwarderStats, createHealthUrl, getForwardSkipReason, localSkipReason, normalizeLegacyMessage } from "./logic";
 
@@ -32,62 +35,79 @@ const stats = createForwarderStats();
 
 const settings = definePluginSettings({
     mode: {
-        type: OptionType.SELECT,
-        description: "Remote uses notification rules; Local captures server messages to signal-hub",
-        options: [{ label: "Remote", value: "remote", default: true }, { label: "Local", value: "local" }],
+        type: OptionType.COMPONENT,
+        component: ErrorBoundary.wrap(ForwarderSettings, { noop: false }),
+        default: "local" as "local" | "remote",
         restartNeeded: true,
     },
     localServerUrl: {
         type: OptionType.STRING,
-        description: "Signal-hub ingestion URL on this computer or a LAN machine",
+        displayName: "本地服务地址",
+        description: "Signal-hub 的消息接收地址，可以在本机或内网机器上运行。",
+        placeholder: "http://127.0.0.1:49321/forward",
         default: "http://127.0.0.1:49321/forward",
         restartNeeded: true,
-    },
-    localRuntimeDirectory: {
-        type: OptionType.STRING,
-        description: "Absolute signal-hub/var directory on THIS computer, used for the durable sender queue",
-        default: "",
-        restartNeeded: true,
+        hidden: true,
     },
     localPairingToken: {
         type: OptionType.STRING,
-        description: "Optional: leave empty when the server's pairingToken is empty; otherwise copy it from secrets.json",
+        displayName: "连接令牌（可选）",
+        description: "服务端 pairingToken 为空时无需填写；否则填写 secrets.json 中的同名值。",
+        placeholder: "默认留空",
+        componentProps: { type: "password" },
         default: "",
         restartNeeded: true,
+        hidden: true,
     },
     excludedServerIds: {
         type: OptionType.STRING,
-        description: "Optional excluded Discord server IDs, separated by commas; apply the same list to signal-hub",
+        displayName: "排除的服务器",
+        description: "不采集这些 Discord 服务器的消息，多个 ID 用逗号或空格分隔；本地模式请同步配置 Signal-hub 的排除列表。两个模式共用此安全设置。",
+        placeholder: "可选：服务器 ID",
         default: "",
         restartNeeded: true,
+        hidden: true,
     },
     serverUrl: {
         type: OptionType.STRING,
-        description: "HTTP endpoint to forward notification messages to",
+        displayName: "主转发地址",
+        description: "接收 Discord 通知消息的远程 HTTP 接口，兼容旧版 CF Worker。",
+        placeholder: "请输入主转发地址",
         default: DEFAULT_SERVER_URL,
+        hidden: true,
     },
     fallbackUrl: {
         type: OptionType.STRING,
-        description: "Fallback HTTP endpoint used after all primary attempts fail; leave empty to disable",
+        displayName: "备用转发地址",
+        description: "主接口重试耗尽后使用；留空则禁用。",
+        placeholder: "留空禁用备用接口",
         default: DEFAULT_FALLBACK_URL,
+        hidden: true,
     },
     enableDingTalkAlerts: {
         type: OptionType.BOOLEAN,
-        description: "Send one DingTalk alert after both primary and fallback delivery fail",
+        displayName: "钉钉故障通知",
+        description: "主接口和备用接口均投递失败后，发送一条钉钉通知。",
         default: false,
+        hidden: true,
     },
     dingTalkWebhookUrl: {
         type: OptionType.STRING,
-        description: "DingTalk robot webhook used for final failure alerts",
+        displayName: "钉钉机器人地址",
+        description: "用于远程模式的最终投递失败告警。",
+        placeholder: "请输入钉钉机器人 Webhook 地址",
         default: DEFAULT_DINGTALK_WEBHOOK_URL,
         disabled() { return !this.store.enableDingTalkAlerts; },
+        hidden: true,
     },
     logFailures: {
         type: OptionType.BOOLEAN,
-        description: "Log failed forwards to the console",
+        displayName: "记录失败日志",
+        description: "在控制台记录远程转发失败的详细信息。",
         default: true,
+        hidden: true,
     },
-});
+}).withPrivateSettings<{ localRuntimeDirectory?: string; }>();
 
 interface ForwarderMessage extends MessageJSON {
     sticker_items?: unknown[];
@@ -331,15 +351,16 @@ async function forwardMessage(message: ForwarderMessage) {
 
 async function checkHealth(serverUrl: string) {
     if (!serverUrl) {
-        return { ok: false, status: -1, body: "Server URL is empty" };
+        return { ok: false, status: -1, body: "服务地址为空" };
     }
 
     const healthUrl = createHealthUrl(serverUrl);
     if (!healthUrl) {
-        return { ok: false, status: -1, body: "Server URL is invalid" };
+        return { ok: false, status: -1, body: "服务地址无效" };
     }
 
-    return Native.get(healthUrl);
+    try { return await Native.get(healthUrl); }
+    catch { return { ok: false, status: -1, body: "暂时无法检查远程接口，请稍后重试" }; }
 }
 
 function StatsLine({ label, value }: { label: string; value: number; }) {
@@ -365,34 +386,140 @@ function HealthLine({ label, health }: { label: string; health: HealthCheckState
 }
 
 function LocalTransportSettings() {
+    const { localServerUrl, localPairingToken, excludedServerIds } = settings.use(["localServerUrl", "localPairingToken", "excludedServerIds"]);
     const [status, setStatus] = useState<Awaited<ReturnType<typeof Native.localStatus>> | null>(null);
-    const [health, setHealth] = useState<HealthCheckState>({ status: "idle", message: "Health check has not run yet." });
-    const refresh = async () => {
-        try { setStatus(await Native.localStatus()); } catch { logger.error("Cannot read native sender status"); }
-    };
+    const [service, setService] = useState<LocalServiceStatus | null>(null);
+    const [health, setHealth] = useState<HealthCheckState>({ status: "idle", message: "尚未检查服务状态。" });
+    const [routeId, setRouteId] = useState("");
+    const [test, setTest] = useState<LocalRouteTest | null>(null);
+    const [testRequest, setTestRequest] = useState<{ routeId: string; requestId: string; } | null>(null);
+    const [testing, setTesting] = useState(false);
+    const [testMessage, setTestMessage] = useState("");
+    const connection = { url: localServerUrl.trim(), token: localPairingToken.trim() };
+    const currentConnection = () => settings.store.localServerUrl.trim() === connection.url
+        && settings.store.localPairingToken.trim() === connection.token && settings.store.excludedServerIds === excludedServerIds;
+    const excluded = excludedServerIds.split(/[\s,]+/);
+    const routes = service?.routes.filter(route => route.enabled && !route.excluded && !excluded.includes(route.serverId)) ?? [];
+    const selectedRoute = routes.find(route => route.routeId === routeId);
+
+    useEffect(() => {
+        setService(null);
+        setRouteId("");
+        setTest(null);
+        setTestRequest(null);
+        setTestMessage("");
+        setTesting(false);
+        setHealth({ status: "idle", message: "连接配置已就绪，请检查服务状态。" });
+    }, [localServerUrl, localPairingToken, excludedServerIds]);
+
     const check = async () => {
+        setHealth({ status: "checking", message: "正在检查服务状态和路由配置……" });
         try {
-            const result = await checkHealth(settings.store.localServerUrl);
-            setHealth({ status: result.ok ? "ok" : "error", message: `HTTP ${result.status}` });
-        } catch { setHealth({ status: "error", message: "Signal-hub is unreachable; queued messages remain on disk" }); }
+            const [queue, result] = await Promise.all([Native.localStatus().catch(() => null), Native.checkLocalService(connection)]);
+            if (!currentConnection()) return;
+            setStatus(queue);
+            if (!result.ok) {
+                setService(null);
+                setHealth({ status: "error", message: result.message });
+                return;
+            }
+            setService(result.data);
+            setHealth({ status: "ok", message: result.data.paused ? "服务可连接，但已暂停投递和信号解析。" : "服务可连接，投递未暂停。" });
+        } catch {
+            if (!currentConnection()) return;
+            setService(null);
+            setHealth({ status: "error", message: "无法检查服务状态，请查看本地进程和网络。" });
+        }
     };
+
+    async function refreshTest() {
+        if (!test) return;
+        try {
+            const result = await Native.localTestStatus(connection, test.requestId);
+            if (!currentConnection()) return;
+            if (result.ok) { setTest(result.data); setTestMessage(""); }
+            else setTestMessage(result.message);
+        } catch { if (currentConnection()) setTestMessage("暂时无法查询结果，测试任务仍保留在服务端，可稍后刷新。"); }
+    }
+
+    useEffect(() => {
+        if (!test || !["pending", "leased", "sending"].includes(test.state)) return;
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            try {
+                const result = await Native.localTestStatus(connection, test.requestId);
+                if (cancelled) return;
+                if (result.ok) setTest(result.data);
+                else setTestMessage(result.message);
+            } catch { if (!cancelled) setTestMessage("查询中断，请点击刷新测试结果。"); }
+        }, 2000);
+        return () => { cancelled = true; clearTimeout(timer); };
+    }, [test, localServerUrl, localPairingToken]);
+
+    async function sendTest() {
+        if (!selectedRoute || service?.paused || testing) return;
+        setTesting(true);
+        const request = testRequest?.routeId === routeId && !test ? testRequest : { routeId, requestId: crypto.randomUUID() };
+        setTestRequest(request);
+        setTest(null);
+        setTestMessage("");
+        try {
+            const result = await Native.testLocalRoute(connection, request.routeId, request.requestId);
+            if (!currentConnection()) return;
+            if (result.ok) setTest(result.data);
+            else setTestMessage(result.message);
+        } catch { if (currentConnection()) setTestMessage("提交结果未知，请重试提交；同一测试编号不会重复创建任务。"); }
+        finally { if (currentConnection()) setTesting(false); }
+    }
+
+    const stateLabels: Record<string, string> = {
+        pending: "已入队，尚未确认送达", leased: "正在准备投递", sending: "正在发送", sent: "已确认送达 Discord",
+        retry_wait: "投递失败，等待重试和周期修复", uncertain: "发送结果待对账，请勿重复发送", held: "被安全检查或当前配置暂缓",
+        review: "需要人工检查", dead: "投递失败，任务已保留",
+    };
+
     return (
         <Flex flexDirection="column" gap="8px">
-            <Paragraph>Local mode captures server messages after self and excluded-server filtering. Signal-hub archives and routes them. The runtime directory belongs to this computer, including when the service runs on another LAN machine.</Paragraph>
-            <Paragraph>Run pnpm hub:configure once to create JSON configuration. Configure the URL and this computer's queue directory below; leave the token empty for the default server configuration. Select Local and restart Discord to apply.</Paragraph>
+            <Paragraph>采集服务器消息，经自发消息和排除列表过滤后交给 Signal-hub，统一保存、路由和转发。本机发送队列目录自动确定，无需配置。</Paragraph>
             <Flex gap="8px">
-                <Button onClick={refresh}>Refresh sender status</Button>
-                <Button onClick={check}>Check signal-hub</Button>
+                <Button onClick={check} disabled={health.status === "checking"}>{health.status === "checking" ? "正在检查……" : "检查本地 API 与发送队列"}</Button>
             </Flex>
             <HealthLine label="Signal-hub" health={health} />
+            {service && <>
+                {service.paused && <Paragraph>暂停期间仍接收并保存消息，但不向 Discord 投递，也不执行信号解析。重启不会解除暂停；需要手动调用 POST /api/resume。测试按钮也会暂停使用。</Paragraph>}
+                <Paragraph>最近配置同步：{service.configSyncedAt ? new Date(Number(service.configSyncedAt)).toLocaleString() : "尚无缓存配置"}。可测试路由：{routes.length} 条。</Paragraph>
+                <Paragraph>服务任务：{service.jobs.map(job => `${stateLabels[job.state] ?? "其他状态"} ${job.total} 条`).join("；") || "暂无任务"}。</Paragraph>
+                <Select
+                    options={routes.map(route => ({ label: `${route.name || route.routeId} → ${route.targetChannelId}`, value: route.routeId }))}
+                    select={(value: string) => { setRouteId(value); }}
+                    isSelected={value => value === routeId}
+                    serialize={value => String(value)}
+                    placeholder="选择要测试的路由"
+                    maxVisibleItems={6}
+                    closeOnSelect={true}
+                />
+                <Paragraph>点击后将向所选路由的目标频道真实发送一条标记为测试的消息，用于验证凭据、权限、防回流检查和投递链路；不执行消息内容过滤和信号解析。</Paragraph>
+                <Flex gap="8px" flexWrap="wrap">
+                    <Button onClick={sendTest} disabled={!selectedRoute || service.paused || testing || Boolean(test && test.routeId === routeId && test.state !== "sent")}>
+                        {testing ? "正在提交……" : testRequest && !test ? "重试提交测试" : "发送路由测试消息"}
+                    </Button>
+                    {test && <Button variant="secondary" onClick={refreshTest}>刷新测试结果</Button>}
+                </Flex>
+            </>}
+            {testMessage && <Paragraph>{testMessage}</Paragraph>}
+            {test && <>
+                <Paragraph>测试结果：{stateLabels[test.state] ?? "未知状态，请查看服务日志"}。已尝试 {test.attempts} 次。目标频道：{test.targetChannelId}。</Paragraph>
+                <Paragraph>测试编号：{test.requestId}。{test.error ? `诊断代码：${test.error}` : ""}</Paragraph>
+            </>}
             {status && <>
-                <Paragraph>{status.active ? "Sender active" : "Sender inactive"}{status.lastError ? `: ${status.lastError}` : ""}</Paragraph>
-                <StatsLine label="Pending durable handoff" value={status.pending} />
-                <StatsLine label="Staged records awaiting recovery" value={status.staged} />
-                <StatsLine label="Durably acknowledged by signal-hub" value={status.acked} />
-                <StatsLine label="Quarantined records" value={status.quarantined} />
-                <StatsLine label="Consecutive handoff failures" value={status.consecutiveFailures} />
-                <Paragraph>Oldest pending: {status.oldestPendingAt === null ? "none" : new Date(status.oldestPendingAt).toLocaleString()}. Last durable ACK: {status.lastAcknowledgedAt === null ? "none this session" : new Date(status.lastAcknowledgedAt).toLocaleString()}.</Paragraph>
+                <Paragraph>{status.active ? "本机发送队列运行中" : "本机发送队列未运行"}{status.lastError ? `：${status.lastError}` : ""}</Paragraph>
+                <StatsLine label="待交接的持久化消息" value={status.pending} />
+                <StatsLine label="等待恢复的暂存记录" value={status.staged} />
+                <StatsLine label="服务已确认保存的消息" value={status.acked} />
+                <StatsLine label="隔离记录" value={status.quarantined} />
+                <StatsLine label="连续交接失败次数" value={status.consecutiveFailures} />
+                <Paragraph>最早待发送：{status.oldestPendingAt === null ? "无" : new Date(status.oldestPendingAt).toLocaleString()}。最近确认保存：{status.lastAcknowledgedAt === null ? "本次会话暂无" : new Date(status.lastAcknowledgedAt).toLocaleString()}。</Paragraph>
+                {status.runtimeDirectory && <Paragraph>本机队列目录：{status.runtimeDirectory}</Paragraph>}
             </>}
         </Flex>
     );
@@ -401,18 +528,18 @@ function LocalTransportSettings() {
 function RemoteTransportSettings() {
     const [primaryHealth, setPrimaryHealth] = useState<HealthCheckState>({
         status: "idle",
-        message: "Health check has not run yet."
+        message: "尚未检查服务状态。"
     });
     const fallbackUrl = settings.use(["fallbackUrl"]).fallbackUrl.trim();
     const [fallbackHealth, setFallbackHealth] = useState<HealthCheckState>({
         status: fallbackUrl ? "idle" : "error",
-        message: fallbackUrl ? "Health check has not run yet." : "Not configured"
+        message: fallbackUrl ? "尚未检查服务状态。" : "未配置"
     });
     const [statsSnapshot, setStatsSnapshot] = useState(stats.snapshot());
     const displayedFallbackHealth: HealthCheckState = !fallbackUrl
-        ? { status: "error", message: "Not configured" }
-        : fallbackHealth.message === "Not configured"
-            ? { status: "idle", message: "Health check has not run yet." }
+        ? { status: "error", message: "未配置" }
+        : fallbackHealth.message === "未配置"
+            ? { status: "idle", message: "尚未检查服务状态。" }
             : fallbackHealth;
 
     const refreshStats = () => setStatsSnapshot(stats.snapshot());
@@ -422,15 +549,15 @@ function RemoteTransportSettings() {
     };
 
     async function handlePrimaryHealthCheck() {
-        setPrimaryHealth({ status: "checking", message: "Checking primary endpoint..." });
+        setPrimaryHealth({ status: "checking", message: "正在检查主接口……" });
         const result = await checkHealth(settings.store.serverUrl.trim());
-        const duration = result.durationMs === undefined ? "" : ` in ${result.durationMs}ms`;
+        const duration = result.durationMs === undefined ? "" : `，耗时 ${result.durationMs} 毫秒`;
 
         if (result.ok) {
-            setPrimaryHealth({ status: "ok", message: `Healthy (${result.status})${duration}: ${result.body}` });
-            showToast({ text: "Primary forwarder endpoint is healthy", variant: "success" });
+            setPrimaryHealth({ status: "ok", message: `主接口正常（HTTP ${result.status}）${duration}` });
+            showToast({ text: "主转发接口运行正常", variant: "success" });
         } else {
-            const message = `Health check failed (${result.status})${duration}: ${result.body}`;
+            const message = `主接口检查失败（HTTP ${result.status}）${duration}`;
             setPrimaryHealth({ status: "error", message });
             showToast({ text: message, variant: "critical" });
         }
@@ -438,18 +565,18 @@ function RemoteTransportSettings() {
 
     async function handleFallbackHealthCheck() {
         if (!fallbackUrl) {
-            setFallbackHealth({ status: "error", message: "Not configured" });
+            setFallbackHealth({ status: "error", message: "未配置" });
             return;
         }
 
-        setFallbackHealth({ status: "checking", message: "Checking fallback endpoint..." });
+        setFallbackHealth({ status: "checking", message: "正在检查备用接口……" });
         const result = await checkHealth(fallbackUrl);
-        const duration = result.durationMs === undefined ? "" : ` in ${result.durationMs}ms`;
+        const duration = result.durationMs === undefined ? "" : `，耗时 ${result.durationMs} 毫秒`;
         if (result.ok) {
-            setFallbackHealth({ status: "ok", message: `Healthy (${result.status})${duration}: ${result.body}` });
-            showToast({ text: "Fallback forwarder endpoint is healthy", variant: "success" });
+            setFallbackHealth({ status: "ok", message: `备用接口正常（HTTP ${result.status}）${duration}` });
+            showToast({ text: "备用转发接口运行正常", variant: "success" });
         } else {
-            const message = `Health check failed (${result.status})${duration}: ${result.body}`;
+            const message = `备用接口检查失败（HTTP ${result.status}）${duration}`;
             setFallbackHealth({ status: "error", message });
             showToast({ text: message, variant: "critical" });
         }
@@ -459,46 +586,71 @@ function RemoteTransportSettings() {
         <Flex flexDirection="column" gap="12px">
             <Flex gap="8px" flexWrap="wrap">
                 <Button onClick={() => void handlePrimaryHealthCheck()} disabled={primaryHealth.status === "checking"}>
-                    {primaryHealth.status === "checking" ? "Checking primary..." : "Check primary health"}
+                    {primaryHealth.status === "checking" ? "正在检查主接口……" : "检查主接口"}
                 </Button>
                 <Button onClick={() => void handleFallbackHealthCheck()} disabled={!fallbackUrl || fallbackHealth.status === "checking"}>
-                    {fallbackHealth.status === "checking" ? "Checking fallback..." : "Check fallback health"}
+                    {fallbackHealth.status === "checking" ? "正在检查备用接口……" : "检查备用接口"}
                 </Button>
                 <Button variant="secondary" onClick={refreshStats}>
-                    Refresh stats
+                    刷新统计
                 </Button>
                 <Button onClick={clearStats}>
-                    Clear stats
+                    清空统计
                 </Button>
             </Flex>
 
-            <HealthLine label="Primary" health={primaryHealth} />
-            <HealthLine label="Fallback" health={displayedFallbackHealth} />
+            <HealthLine label="主接口" health={primaryHealth} />
+            <HealthLine label="备用接口" health={displayedFallbackHealth} />
 
             <div className={Margins.top8}>
-                <Heading tag="h3">Runtime stats</Heading>
-                <Paragraph>Current plugin session only.</Paragraph>
+                <Heading tag="h3">运行统计</Heading>
+                <Paragraph>仅统计本次插件运行期间的数据。</Paragraph>
                 <Flex flexDirection="column" gap="4px" className={Margins.top8}>
-                    <StatsLine label="Forwarded" value={statsSnapshot.forwarded} />
-                    <StatsLine label="Failed" value={statsSnapshot.failed} />
-                    <StatsLine label="Skipped self messages" value={statsSnapshot.filteredSelf} />
-                    <StatsLine label="Skipped non-server notifications" value={statsSnapshot.filteredNonGuild} />
-                    <StatsLine label="Skipped by Discord notification rules" value={statsSnapshot.filteredDiscord} />
+                    <StatsLine label="转发成功" value={statsSnapshot.forwarded} />
+                    <StatsLine label="转发失败" value={statsSnapshot.failed} />
+                    <StatsLine label="跳过自己发送的消息" value={statsSnapshot.filteredSelf} />
+                    <StatsLine label="跳过非服务器通知" value={statsSnapshot.filteredNonGuild} />
+                    <StatsLine label="被 Discord 通知规则过滤" value={statsSnapshot.filteredDiscord} />
                 </Flex>
             </div>
         </Flex>
     );
 }
 
-function ForwarderSettings() {
-    const { mode } = settings.use(["mode"]);
-    const modeLabel = mode === "local" ? "Local" : "Remote";
-    const activeLabel = activeMode === "local" ? "Local" : activeMode === "remote" ? "Remote" : "Inactive";
+function ForwarderSettings({ setValue, closePluginSettings }: PluginSettingComponentProps): ReactNode {
+    const values = settings.use();
+    const { mode } = values;
+    const modeLabel = mode === "local" ? "本地（Local）" : "远程（Remote）";
+    const activeLabel = activeMode === "local" ? "本地（Local）" : activeMode === "remote" ? "远程（Remote）" : "未运行";
+    const fields = mode === "local"
+        ? ["localServerUrl", "localPairingToken", "excludedServerIds"] as const
+        : ["serverUrl", "fallbackUrl", "enableDingTalkAlerts", "dingTalkWebhookUrl", "logFailures", "excludedServerIds"] as const;
     return (
         <Flex flexDirection="column" gap="12px">
-            <Paragraph>Active mode: {activeLabel}.</Paragraph>
-            {activeMode && activeMode !== mode && <Paragraph>Restart the client to apply {modeLabel}. Messages continue using {activeLabel} until restart.</Paragraph>}
-            {(activeMode ?? mode) === "local" ? <LocalTransportSettings /> : <RemoteTransportSettings />}
+            <TabBar type="top" look="brand" selectedItem={mode} onItemSelect={setValue}>
+                <TabBar.Item id="local">本地（Local）</TabBar.Item>
+                <TabBar.Item id="remote">远程（Remote）</TabBar.Item>
+            </TabBar>
+            <Paragraph>当前运行模式：{activeLabel}。切换标签页会保存模式选择，重启 Discord 后生效。</Paragraph>
+            {activeMode && activeMode !== mode && <Paragraph>待应用：{modeLabel}。重启前消息继续使用{activeLabel}，本页检查和测试使用正在编辑的服务地址。</Paragraph>}
+            {mode === "remote" && <Paragraph>遵循 Discord 通知规则，使用兼容旧版 CF Worker 的消息格式。此页的地址和告警设置仅用于远程模式。</Paragraph>}
+            {fields.map(key => {
+                const setting = settings.def[key];
+                const Component = OptionComponentMap[setting.type];
+                return <Component
+                    key={key}
+                    id={key}
+                    setting={setting}
+                    definedSettings={settings}
+                    pluginSettings={{ ...values, enabled: true }}
+                    closePluginSettings={closePluginSettings}
+                    onChange={value => {
+                        Object.assign(settings.store, { [key]: value });
+                        if ("restartNeeded" in setting && setting.restartNeeded) setValue(mode);
+                    }}
+                />;
+            })}
+            {mode === "local" ? <LocalTransportSettings /> : <RemoteTransportSettings />}
         </Flex>
     );
 }
@@ -506,17 +658,17 @@ function ForwarderSettings() {
 export default definePlugin({
     name: "forwarder",
     enabledByDefault: true,
-    description: "Forwards Discord notification messages with metadata to a configurable HTTP server.",
+    description: "将 Discord 服务器消息交给本地 Signal-hub，或通过远程接口转发通知。",
     authors: [Devs.iondex],
     tags: ["Notifications", "Utility"],
     settings,
 
     start() {
-        activeMode = settings.store.mode === "local" ? "local" : "remote";
+        activeMode = settings.store.mode === "remote" ? "remote" : "local";
         if (activeMode !== "local") return;
         localReady = Native.configureLocal({
             url: settings.store.localServerUrl.trim(),
-            runtimeDirectory: settings.store.localRuntimeDirectory.trim(),
+            runtimeDirectory: settings.store.localRuntimeDirectory?.trim(),
             token: settings.store.localPairingToken.trim(),
         });
         void localReady.catch(() => logger.error("Local handoff configuration failed; check URL, runtime directory and pairing token"));
@@ -546,6 +698,4 @@ export default definePlugin({
             });
         }
     },
-
-    settingsAboutComponent: ErrorBoundary.wrap(ForwarderSettings, { noop: false })
 });

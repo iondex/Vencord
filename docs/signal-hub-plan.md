@@ -202,12 +202,12 @@ local 监听现有 `MESSAGE_CREATE`，只做少量基本检查：具有有效 me
 
 | 设置 | 建议行为 |
 | --- | --- |
-| `mode` | `local` / `remote`；新 fork 的初始配置使用 local；旧设置迁移先保持 remote，待切换步骤完成再启用 local |
+| `mode` | 本地（Local）/远程（Remote）标签页；未设置时默认 `local`，已保存的选择保留，切换后重启生效 |
 | `localServerUrl` | 默认 `http://127.0.0.1:49321/forward`；支持本机或内网机器的 HTTP(S) 地址，不允许 URL 内嵌凭据或自动重定向 |
-| `localRuntimeDir` | 首次初始化时设置绝对的 `signal-hub/var`；不从 Electron cwd 猜路径 |
+| 本机发送队列目录 | 自动使用 Vencord 数据目录下的 `signal-hub/var`，未指定数据目录时由构建位置确定；沿用旧自定义目录以保留积压，无需界面配置 |
 | `excludedServerIds` | 可选，可为空；保留经核对的既有固定排除项。初始化时给插件与本地服务同一份名单，不从通知资格推导，也不要求把目标 server 整体排除来防循环 |
 | 旧 `serverUrl` / `fallbackUrl` | 仅 remote 模式使用，保留现有语义 |
-| health / statistics | 插件只展示模式、基本过滤计数、暂存/接管数量、连接状态与最近错误；配置版本、处理链和最终投递统计由 server 的 status/CLI 展示 |
+| 服务与转发测试 | 本地标签查询 API、暂停状态、缓存路由和本机队列；选择单条路由创建有审计的测试投递并查询结果，复用现有重试及安全校验，不执行信号解析 |
 
 local 模式绝不自动 fallback 到 CF `/forward`。本地不可用时只在磁盘排队和报告状态，避免破坏本地执行约束、重复投递或使排查数据分散。
 

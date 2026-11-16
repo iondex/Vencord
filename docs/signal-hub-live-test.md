@@ -119,11 +119,12 @@ forwarder：
 
 | 字段 | 首轮值 |
 | --- | --- |
-| `mode` | Local |
+| 模式标签 | 本地（Local），未设置过模式时为默认值 |
 | `localServerUrl` | `http://127.0.0.1:49321/forward` |
-| `localRuntimeDirectory` | `/Users/iondex/dev/Vencord/signal-hub/var` |
 | `localPairingToken` | 留空 |
 | `excludedServerIds` | 保留已有排除项，与服务一致；不要排除测试来源 server |
+
+本机队列目录自动确定，无需填写。先点“检查本地 API 与发送队列”，确认服务可访问、当前为暂停状态，并能读取缓存路由。这一步不发消息。转发测试会向所选路由的目标真实发送一条测试消息；需先确认选中的是测试目标，再通过 `POST /api/resume` 放行。恢复同时会放行已归档的其他待投递任务，首轮应使用隔离测试配置或切换窗口。暂停期间无法进行真实投递测试。
 
 transcribe：
 

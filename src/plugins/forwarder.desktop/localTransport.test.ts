@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,31 +25,66 @@ async function checkPluginModeLifecycle() {
     let queuedLocal = 0;
     let finishConfiguration: () => void = () => { throw new Error("Local configuration has not started"); };
     const errors: unknown[] = [];
+    let definition: Record<string, any> = {};
+    let localOptions: any;
+    const hookValues: any[] = [];
+    let hookCursor = 0;
+    let paused = true;
+    let delivered = false;
+    let loseTestResponse = true;
+    const testIds: string[] = [];
     const native = {
-        async configureLocal() {
+        async configureLocal(options: unknown) {
+            localOptions = options;
             configured++;
             await new Promise<void>(resolve => { finishConfiguration = resolve; });
         },
         async stopLocal() {},
         async enqueueLocal() { queuedLocal++; return { ok: true }; },
         async send() { sentRemote++; return { ok: true }; },
+        async localStatus() { return { active: false, pending: 0, staged: 0, acked: 0, quarantined: 0, consecutiveFailures: 0, oldestPendingAt: null, lastAcknowledgedAt: null }; },
+        async checkLocalService() {
+            return { ok: true, data: { service: "signal-hub", protocol: 2, paused, configSyncedAt: null, jobs: [], routes: [
+                { routeId: "route", name: "测试目标", enabled: true, serverId: "4", targetChannelId: "6", excluded: false },
+            ] } };
+        },
+        async testLocalRoute(_connection: unknown, routeId: string, requestId: string) {
+            testIds.push(requestId);
+            if (loseTestResponse) { loseTestResponse = false; throw new Error("Test submission response lost"); }
+            return { ok: true, data: { routeId, requestId, targetChannelId: "6", state: "pending", attempts: 0, error: "" } };
+        },
+        async localTestStatus(_connection: unknown, requestId: string) {
+            return { ok: true, data: { routeId: "route", requestId, targetChannelId: "6", state: delivered ? "sent" : "pending", attempts: 1, error: "" } };
+        },
     };
     const mocks: Record<string, unknown> = {
-        "@api/Settings": { definePluginSettings: () => ({ store, use: () => store }) },
+        "@api/Settings": { definePluginSettings: (def: typeof definition) => {
+            definition = def;
+            return { store, def, use: () => store, withPrivateSettings() { return this; } };
+        } },
         "@components/Button": { Button() {} },
         "@components/ErrorBoundary": { default: { wrap: (component: unknown) => component } },
         "@components/Flex": { Flex() {} },
         "@components/Heading": { Heading() {} },
         "@components/Paragraph": { Paragraph() {} },
+        "@components/settings/tabs/plugins/components": { OptionComponentMap: { 1() {}, 2() {} } },
         "@utils/constants": { Devs: { iondex: {} } },
         "@utils/Logger": { Logger: function () { return { error: (...values: unknown[]) => errors.push(values) }; } },
         "@utils/margins": { Margins: {} },
-        "@utils/types": { default: (plugin: unknown) => plugin, OptionType: { SELECT: 0, STRING: 1, BOOLEAN: 2 } },
+        "@utils/types": { default: (plugin: unknown) => plugin, OptionType: { SELECT: 0, STRING: 1, BOOLEAN: 2, COMPONENT: 3 } },
         "@webpack": { findByCodeLazy: () => () => notificationsEnabled },
         "@webpack/common": {
             ChannelStore: { getChannel: () => ({ id: "2", guild_id: "4", type: 0, name: "source" }) },
             GuildStore: { getGuild: () => ({ id: "4", name: "server" }) },
             UserStore: { getCurrentUser: () => ({ id: "1", username: "collector" }) },
+            TabBar: Object.assign(function () {}, { Item() {} }),
+            Select() {},
+            useEffect() {},
+            useState(initial: unknown) {
+                const cursor = hookCursor++;
+                if (!(cursor in hookValues)) hookValues[cursor] = initial;
+                return [hookValues[cursor], (value: unknown) => { hookValues[cursor] = value; }];
+            },
         },
     };
     const bundle = await build({
@@ -59,12 +94,60 @@ async function checkPluginModeLifecycle() {
     const output = { exports: {} as { default: { start(): void; stop(): void; flux: { MESSAGE_CREATE(event: unknown): void; }; }; } };
     runInNewContext(bundle.outputFiles[0].text, {
         module: output, VencordNative: { pluginHelpers: { forwarder: native } },
+        React: { createElement: (type: unknown, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) },
+        crypto: { randomUUID },
         require(name: string) {
             assert.ok(name in mocks, `Unexpected plugin dependency: ${name}`);
             return { __esModule: true, ...mocks[name] as object };
         },
     });
     const plugin = output.exports.default;
+    assert.equal(definition.mode.default, "local", "New installations default to Local");
+    assert.equal("localRuntimeDirectory" in definition, false, "The queue directory is no longer a visible setting");
+    const fields = (tree: any): string[] => Array.isArray(tree) ? tree.flatMap(fields)
+        : tree && typeof tree === "object" ? [tree.props?.id, ...fields(tree.props?.children)].filter(Boolean) : [];
+    const props = { setValue: (value: string) => { store.mode = value; }, closePluginSettings() {} };
+    store.mode = "local";
+    const localTab = definition.mode.component(props);
+    assert.equal(localTab.props.children[0].props.selectedItem, "local");
+    assert.ok(fields(localTab).includes("localServerUrl"));
+    assert.ok(!fields(localTab).includes("serverUrl"));
+    localTab.props.children[0].props.onItemSelect("remote");
+    const remoteTab = definition.mode.component(props);
+    assert.ok(fields(remoteTab).includes("serverUrl"));
+    assert.ok(!fields(remoteTab).includes("localPairingToken"));
+    const localComponent = localTab.props.children.at(-1).type;
+    const render = () => { hookCursor = 0; return localComponent(); };
+    const elements = (tree: any): any[] => Array.isArray(tree) ? tree.flatMap(elements)
+        : tree && typeof tree === "object" ? [tree, ...elements(tree.props?.children)] : [];
+    const text = (tree: any): string => Array.isArray(tree) ? tree.map(text).join("")
+        : tree && typeof tree === "object" ? text(tree.props?.children) : String(tree ?? "");
+    const button = (tree: any, label: string) => elements(tree).find(element => typeof element.props?.onClick === "function" && text(element).includes(label));
+    store.mode = "local";
+    let panel = render();
+    assert.equal(button(panel, "发送路由测试消息"), undefined, "A route test requires a successful service check");
+    await button(panel, "检查本地 API").props.onClick();
+    panel = render();
+    const select = elements(panel).find(element => typeof element.props?.select === "function");
+    select.props.select("route");
+    panel = render();
+    assert.equal(button(panel, "发送路由测试消息").props.disabled, true, "Paused services cannot submit real route tests");
+    assert.match(text(panel), /暂停期间仍接收并保存/);
+    paused = false;
+    await button(panel, "检查本地 API").props.onClick();
+    panel = render();
+    assert.equal(button(panel, "发送路由测试消息").props.disabled, false);
+    await button(panel, "发送路由测试消息").props.onClick();
+    panel = render();
+    await button(panel, "重试提交测试").props.onClick();
+    assert.equal(testIds[0], testIds[1], "A lost test response must reuse its idempotency key");
+    panel = render();
+    assert.match(text(panel), /已入队，尚未确认送达/);
+    assert.doesNotMatch(text(panel), /已确认送达 Discord/);
+    delivered = true;
+    await button(panel, "刷新测试结果").props.onClick();
+    assert.match(text(render()), /已确认送达 Discord/);
+    store.mode = "remote";
     const message = { id: "3", channel_id: "2", guild_id: "4", content: "fixture", author: { id: "5", username: "sender" } };
     const receive = async (authorId = "5") => {
         plugin.flux.MESSAGE_CREATE({ message: { ...message, author: { ...message.author, id: authorId } } });
@@ -85,6 +168,7 @@ async function checkPluginModeLifecycle() {
     assert.equal(sentRemote, 2);
     plugin.start();
     assert.equal(configured, 1);
+    assert.equal(localOptions.runtimeDirectory, store.localRuntimeDirectory, "Preserve an existing queue directory so pending captures are not abandoned");
     store.mode = "remote";
     notificationsEnabled = false;
     await receive();

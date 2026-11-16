@@ -12,7 +12,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { configureLocal, enqueueLocal, ForwardDependencies, ForwardRequest, get, localStatus, sendWithResilience, stopLocal } from "./native";
+import { checkLocalService, configureLocal, enqueueLocal, ForwardDependencies, ForwardRequest, get, localStatus, localTestStatus, sendWithResilience, stopLocal, testLocalRoute } from "./native";
 
 function response(status: number, body: string, statusText = "") {
     return new Response(body, {
@@ -46,6 +46,57 @@ function request(overrides: Partial<ForwardRequest> = {}): ForwardRequest {
 }
 
 async function main() {
+{
+    const directory = mkdtempSync(join(tmpdir(), "forwarder-auto-directory-"));
+    const previousDirectory = process.env.VENCORD_USER_DATA_DIR;
+    process.env.VENCORD_USER_DATA_DIR = directory;
+    try {
+        await configureLocal(null as never, { url: "http://127.0.0.1:49321/forward", token: "" });
+        assert.equal(localStatus(null as never).runtimeDirectory, join(directory, "signal-hub", "var"));
+    } finally {
+        await stopLocal(null as never);
+        if (previousDirectory === undefined) delete process.env.VENCORD_USER_DATA_DIR;
+        else process.env.VENCORD_USER_DATA_DIR = previousDirectory;
+        rmSync(directory, { recursive: true, force: true });
+    }
+}
+{
+    const requests: { path: string; token?: string; body: string; }[] = [];
+    const server = createServer(async (request, reply) => {
+        let body = "";
+        for await (const chunk of request) body += String(chunk);
+        requests.push({ path: request.url!, token: request.headers.authorization, body });
+        reply.setHeader("Content-Type", "application/json");
+        if (request.url === "/api/local/status") reply.end(JSON.stringify({
+            service: "signal-hub", protocol: 2, paused: true, jobs: [], configSyncedAt: null,
+            routes: Array.from({ length: 80 }, (_, index) => ({ routeId: `route-${index}`, name: "测试路由", enabled: true, serverId: "2", targetChannelId: "5", excluded: false })),
+        }));
+        else reply.end(JSON.stringify({ requestId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", routeId: "route-1", state: "pending" }));
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    try {
+        const address = server.address();
+        assert.ok(address && typeof address !== "string");
+        const connection = { url: `http://127.0.0.1:${address.port}/forward`, token: "test-token" };
+        const result = await checkLocalService(null as never, connection);
+        assert.ok(result.ok);
+        assert.equal(result.data.paused, true);
+        assert.equal(result.data.routes.length, 80, "Route lists are not truncated like Remote health-check response excerpts");
+        const requestId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        assert.equal((await testLocalRoute(null as never, connection, "route-1", requestId)).ok, true);
+        assert.equal((await localTestStatus(null as never, connection, requestId)).ok, true);
+        assert.equal(requests[1].path, "/api/local/test");
+        assert.deepEqual(JSON.parse(requests[1].body), { routeId: "route-1", requestId });
+        assert.equal(requests[0].token, "Bearer test-token");
+        await checkLocalService(null as never, { ...connection, token: "" });
+        assert.equal(requests.at(-1)?.token, undefined);
+        assert.equal((await localTestStatus(null as never, connection, "invalid/path")).ok, false);
+        assert.equal(requests.length, 4);
+    } finally {
+        await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
+    }
+}
 {
     let callCount = 0;
     const { dependencies, sleeps } = createDependencies((async () => {

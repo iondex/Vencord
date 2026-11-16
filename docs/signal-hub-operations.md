@@ -72,13 +72,12 @@ pnpm inject
 
 | 插件设置 | 本机部署的填写内容 |
 | --- | --- |
-| `mode` | **Local** |
-| `localServerUrl` | 默认 `http://127.0.0.1:49321/forward`；服务在内网时填写该机器的可访问 URL |
-| `localRuntimeDirectory` | Discord 机器上 checkout 的绝对路径，例如 `/absolute/path/Vencord/signal-hub/var` |
-| `localPairingToken` | 默认留空；仅在服务的 `pairingToken` 非空时填写相同值 |
-| `excludedServerIds` | 按需填写逗号分隔的 server ID，并与服务的 `settings.json` 保持一致 |
+| 本地（Local）标签 | 未设置过模式时默认选中；已保存的模式选择会保留 |
+| 本地服务地址（`localServerUrl`） | 默认 `http://127.0.0.1:49321/forward`；服务在内网时填写该机器的可访问 URL |
+| 连接令牌（`localPairingToken`） | 默认留空；仅在服务的 `pairingToken` 非空时填写相同值 |
+| 排除的服务器（`excludedServerIds`） | 按需填写逗号或空格分隔的 server ID，并与服务的 `settings.json` 保持一致 |
 
-保存后完整退出并重启 Discord。插件配置使用 Vencord 自带的设置存储，无需编辑额外连接文件。内网部署时队列目录仍填 Discord 机器上的绝对路径。
+保存后完整退出并重启 Discord。插件配置使用 Vencord 自带的设置存储，无需编辑额外连接文件。本机队列目录自动使用 Vencord 数据目录下的 `signal-hub/var`，本仓库注入器会将数据目录设为 checkout 根目录；未指定数据目录时使用构建文件所在仓库。已有自定义队列目录会沿用，以免遗留待发送消息；界面只读展示实际目录，不再要求填写。服务在内网机器时，发送队列仍在 Discord 采集机。
 
 主服务、watchdog 以及可选 channel-logger 各占一个终端：
 
@@ -88,7 +87,7 @@ pnpm inject
 | 独立心跳告警 | `pnpm hub:watchdog` |
 | 可选频道日志及补采来源 | `pnpm logger -- --dir /absolute/path/Vencord/signal-hub/var/channel-logger` |
 
-主服务会自行维护解析、投递、补发、配置同步和业务告警任务，不需要另外启动投递 worker。watchdog 没有钉钉凭据时启动输出 `notifications disabled`。仅设置 Local 和连接地址、队列目录即可按默认配置采集归档；实际转发需要服务端发送凭据及可用 routes。
+主服务会自行维护解析、投递、补发、配置同步和业务告警任务，不需要另外启动投递 worker。watchdog 没有钉钉凭据时启动输出 `notifications disabled`。仅选择 Local 并设置连接地址即可按默认配置采集归档；实际转发需要服务端发送凭据及可用 routes。
 
 可用 `curl --fail http://127.0.0.1:49321/healthz` 检查 HTTP 存活，用 `pnpm hub:status` 查看任务与告警。开发时可使用 `pnpm build --dev --watch` 持续构建，插件设置中标记需重启的连接参数仍应重启 Discord 后生效。
 
@@ -101,16 +100,20 @@ pnpm inject
 1. 在服务机器安装并初始化 `signal-hub`，把 `settings.json` 的 `host` 改成机器的内网地址，或由运维指定监听地址。
 2. 插件的 `localServerUrl` 填成例如 `http://192.168.1.50:49321/forward`；也支持部署了 TLS 的 `https://hub.lan/forward`。
 3. `localPairingToken` 默认留空；如果服务配置了非空 `pairingToken`，则填写相同值。
-4. 插件的 `localRuntimeDirectory` 必须是 **运行 Discord 的机器**上的绝对路径，例如 `/Users/example/dev/Vencord/signal-hub/var`，不能填写另一台机器的路径。
+4. 本机发送队列目录自动确定，不需要配置，也不使用内网服务机器上的目录。
 5. 两端的 `excludedServerIds` 保持相同集合，可以都为空。服务端当前排除的来源只归档；消息声明来源被插件排除、服务端却未排除时进入 `safety_pending`。其他 server 的名单变化不会阻塞该来源的旧积压。
 
 原生发送器通过 HTTP(S) 调用，支持内网域名/IP，不依赖 renderer CORS。认证令牌只放 Authorization 头，URL 不允许用户名、密码、query 和 fragment；重定向不会携带凭据继续请求。HTTP 传输适合受信内网，跨越不可信网络时使用 TLS 入口。
 
 文字链路的构建 profile 注册 `forwarder`、`channel-logger` 及上游必需的 `_api` / `_core`。两插件默认启用，显式关闭的设置会被保留。当前 `local` 分支另已合入并行任务的 `transcribe` 插件；它有独立的设置和实现，本说明中的 Local/Remote 切换仅指 forwarder。`ChannelLogger` / `channellogger` 的旧设置迁移到 `channel-logger`；新名称已有设置时优先保留新设置。
 
-原有用户使用的 remote 行为作为迁移默认值保留，避免升级时凭空把消息切到尚未配置的接收服务。配置完连接信息后显式选择 Local。Local 完全独立，不会转回 CF `/forward`。
+未设置过 `mode` 时默认使用 Local；已明确保存的 Local/Remote 模式保留。Local 完全独立，不会转回 CF `/forward`。
 
-插件设置中的 `mode` 选项显示为 `Remote` / `Local`，配置值分别为 `remote` / `local`，本机和内网部署都使用 Local。切换模式后重启客户端；重启前继续使用当前已启动的模式，设置页显示实际运行模式和待重启提示。Local 的队列状态和健康检查位于同一插件设置页。
+插件设置为中文，使用“本地（Local）”和“远程（Remote）”两个标签页隔离配置，保存值仍为 `local` / `remote`。排除服务器是两个模式共用的安全设置；Local 不显示 Remote 地址或钉钉选项，Remote 不显示 Local 连接设置。切换标签页会保存模式选择，重启客户端后生效；重启前继续使用当前已启动的模式。
+
+在本地标签点击“检查本地 API 与发送队列”，会使用当前填写的地址和连接令牌，查询服务暂停状态、缓存配置同步时间及可用路由，并显示本机队列。检查本身不会投递消息。选择一条路由后点击“发送路由测试消息”，会向其目标频道真实发送一条中文测试消息。测试复用持久化投递任务、重试、审计和防回流检查，仅验证目标投递链路，不执行内容过滤和信号解析，也不验证真实消息的来源匹配。未确认送达时显示入队、重试、暂缓或待对账状态；查询中断后可手动刷新，不把 HTTP 202 当作送达。提交响应丢失时点击重试会复用同一测试编号，避免重复建任务。
+
+暂停时 API 和归档继续运行，但测试按钮不可用，服务端也拒绝新测试任务。`POST /api/resume` 才恢复投递；暂停状态保存在数据库中，重启不会恢复。恢复前应检查积压和其他转发入口，避免两个实例同时发送。
 
 ## 凭据
 
@@ -188,6 +191,12 @@ Signal 使用固定参考版本的纯解析模块；普通投送和模型输入�
 - `GET /api/deliveries?jobId=<64位任务ID>`：该任务最近 100 次发送尝试的详细记录。
 - `POST /api/pause`：停止启动新业务任务，继续归档；已经发出的网络请求不能撤销。
 - `POST /api/resume`：恢复调度，仍经过当前安全校验。
+
+插件诊断接口使用 `pairingToken`，为空时无需认证，无需另行填写 `adminToken`：
+
+- `GET /api/local/status`：返回 Signal-hub 标识、协议版本、暂停状态、缓存配置同步时间和不含凭据的路由摘要，不发消息。
+- `POST /api/local/test`：请求体为 `{"routeId":"选定路由ID","requestId":"UUID"}`，为指定目标创建一个可追踪的测试投递；相同请求编号幂等，暂停、停用或排除来源时拒绝创建。
+- `GET /api/local/tests/<requestId>`：查询该测试的任务状态、尝试次数及诊断代码。只有 `sent` 表示 Discord 已确认送达。
 
 `pnpm --dir signal-hub backup` 使用 SQLite `VACUUM INTO` 创建一致快照，包含原始接收、配置、发送身份历史、发送意图及解析结果。备份放在 `var/backups`，应复制到独立磁盘。恢复时停止服务，以该快照替换主库；先保存原有主库和 WAL/SHM，再恢复整个状态，不要只恢复业务消息表。Native 未确认记录会重新上送并去重。
 
