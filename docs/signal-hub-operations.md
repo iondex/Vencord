@@ -4,6 +4,8 @@
 
 过渡期的 CF 兼容要求约束插件 `remote` 模式：继续使用 legacy payload 与旧版 CF Worker 通信。`local` 使用独立的 v2 采集协议，不模拟旧 Worker，也不自动向 CF 消息入口回退。参考新 CF 架构不改变这个兼容边界。
 
+首次与 transcribe 一起实机测试，见 [联合实机测试方案](signal-hub-live-test.md)，包括私有直播频道规划、生产 route 隔离、设置和分阶段验收。
+
 ## 配置和启动脚本
 
 在 Vencord 仓库根目录运行：
