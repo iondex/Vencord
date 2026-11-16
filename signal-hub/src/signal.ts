@@ -1,6 +1,7 @@
 import { signalEnabled } from "./config.js";
 import { executable } from "./queue.js";
 import { createOpenAICompatibleClient, extractMessageSignal } from "./reference/signal-model.js";
+import { sanitizeForwardText } from "./rendering.js";
 import { evaluateText } from "./routing.js";
 import { Store } from "./storage.js";
 
@@ -54,7 +55,7 @@ export async function runExtraction(store: Store, job: any, apiKey: string | und
                     ? `- ${signal.ticker} ${String(signal.side).toUpperCase()} @ ${signal.entryPrice ?? "N/A"}`
                     : `- ${signal.ticker} ${signal.expiration} ${signal.strike}${signal.side === "call" ? "C" : "P"} @ ${signal.optionPrice ?? "N/A"}`);
                 const source = input.signalContent.trim().split("\n").filter(Boolean).map(line => `> ${line}`).join("\n");
-                const text = ["**入场信号**", "", `**来源: ${route.name}**`, `时间: ${event.message.timestamp ?? event.capturedAt}`, "", "标的:", ...entries, "", "原文:", source].join("\n");
+                const text = sanitizeForwardText(["**入场信号**", "", `时间: ${event.message.timestamp ?? event.capturedAt}`, "", "标的:", ...entries, "", "原文:", source].join("\n"), event);
                 const content = text.length > 1900 ? `${text.slice(0, 1897).replace(/[\uD800-\uDBFF]$/, "")}...` : text;
                 const targets = [current.config.snapshot.signal.targetChannelId];
                 const indexTarget = current.config.snapshot.signal.indexTargetChannelId;

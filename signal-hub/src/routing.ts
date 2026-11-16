@@ -1,5 +1,6 @@
 import { CaptureEnvelope } from "../contracts/ingest.js";
 import { Route, Snapshot } from "./config.js";
+import { renderForwardParts, replaceText } from "./rendering.js";
 
 export function matchingRoutes(snapshot: Snapshot, event: CaptureEnvelope) {
     return snapshot.routes.filter(route => route.enabled && route.serverId === event.serverId
@@ -40,16 +41,7 @@ export function evaluateText(message: Record<string, any>, route: Route) {
     collect(message);
     const original = segments.map(segment => segment.value).join("\n").toLowerCase();
     if (route.filters.some(filter => filter.trim() && original.includes(filter.trim().toLowerCase()))) return { reason: "keyword_blocked", text: "", signalContent: "" };
-    for (const segment of segments) {
-        for (const replacement of route.replacements) {
-            if (!replacement.find) continue;
-            if (replacement.caseSensitive) segment.value = segment.value.split(replacement.find).join(replacement.replaceWith);
-            else {
-                const escaped = replacement.find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-                segment.value = segment.value.replace(new RegExp(escaped, "gi"), () => replacement.replaceWith);
-            }
-        }
-    }
+    for (const segment of segments) segment.value = replaceText(segment.value, route);
     if (route.filterChinese && segments.some(segment => /\p{Script=Han}/u.test(segment.value))) return { reason: "chinese_blocked", text: "", signalContent: "" };
     return {
         reason: "routed",
@@ -58,45 +50,14 @@ export function evaluateText(message: Record<string, any>, route: Route) {
     };
 }
 
-function safeUrl(value: unknown) {
-    if (typeof value !== "string") return "";
-    try { const url = new URL(value); return ["https:", "http:"].includes(url.protocol) ? url.toString() : ""; } catch { return ""; }
-}
-
 export function renderMessage(event: CaptureEnvelope, route: Route) {
     const { message } = event;
     if ((Number(message.flags) & 64) !== 0 || ![0, 19, 20, 21].includes(message.type ?? 0)) return { reason: "archived_unsupported", parts: [] };
     const evaluated = evaluateText(message, route);
     if (evaluated.reason !== "routed") return { reason: evaluated.reason, parts: [] };
-    let { text } = evaluated;
-    const urls = new Set<string>();
-    for (const attachment of message.attachments ?? []) {
-        const image = (attachment.content_type ?? attachment.contentType ?? "").startsWith("image/") || attachment.width > 0;
-        if (!image || route.forwardImages) {
-            const url = safeUrl(attachment.url) || safeUrl(attachment.proxy_url ?? attachment.proxyUrl);
-            if (url) urls.add(url);
-        }
-    }
-    for (const embed of message.embeds ?? []) {
-        for (const value of [embed.url, ...(route.forwardImages ? [embed.image?.url, embed.thumbnail?.url, embed.video?.url] : [])]) {
-            const url = safeUrl(value);
-            if (url && !text.includes(url)) urls.add(url);
-        }
-    }
-    const stickers = message.sticker_items ?? message.stickerItems ?? [];
-    for (const sticker of stickers) text += `\n[Sticker: ${typeof sticker.name === "string" ? sticker.name : sticker.id}]`;
-    const resources = [...urls].join("\n");
-    if (resources) text += `\n${resources}`;
-    if (!text.trim()) return { reason: "archived_unsupported", parts: [] };
-    text += `\nhttps://discord.com/channels/${event.serverId}/${event.channelId}/${message.id}`;
-    const parts: Array<{ content: string; allowed_mentions: { parse: never[] }; }> = [];
-    while (text) {
-        let boundary = Math.min(1900, text.length);
-        if (boundary < text.length && /[\uD800-\uDBFF]/.test(text[boundary - 1])) boundary--;
-        parts.push({ content: text.slice(0, boundary), allowed_mentions: { parse: [] } });
-        text = text.slice(boundary);
-    }
-    return { reason: "routed", parts };
+    const { text } = evaluateText({ ...message, embeds: [], referencedMessage: undefined, referenced_message: undefined }, route);
+    const parts = renderForwardParts(event, route, text);
+    return { reason: parts.length ? "routed" : "archived_unsupported", parts };
 }
 
 export function targetOverlapsSource(snapshot: Snapshot, target: { id: string; parent_id?: string; guild_id?: string; }) {

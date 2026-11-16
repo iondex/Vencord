@@ -15,9 +15,10 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
     async function request(url: string, init: RequestInit = {}) {
         return fetcher(url, { ...init, signal: AbortSignal.timeout(15_000), redirect: "error" });
     }
-    async function resolve(target: string) {
+    async function resolve(target: string, profileRequired = false) {
+        if (profileRequired && !secrets.webhooks?.[target]) throw new Error("missing_discord_webhook");
         const cached = identities.get(target);
-        if (cached && cached.expiresAt > Date.now()) return cached;
+        if (cached && cached.expiresAt > Date.now() && (!profileRequired || cached.webhook)) return cached;
         const botHeaders = { Authorization: `Bot ${secrets.botToken ?? ""}` };
         let identity: string;
         let url: string;
@@ -79,14 +80,17 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
             store.db.prepare("UPDATE delivery_attempts SET finished_at=?,outcome=?,status=?,error=? WHERE id=?").run(Date.now(), outcome, status, error, attemptId);
         };
         let target: Awaited<ReturnType<typeof resolve>>;
+        const profile = context.config.snapshot.profiles.find(candidate => candidate.targetChannelId === job.target);
+        const displayName = typeof profile?.displayName === "string" ? profile.displayName.trim().slice(0, 80) : "";
+        const avatarUrl = typeof profile?.avatarUrl === "string" ? profile.avatarUrl.trim() : "";
         try {
-            target = await resolve(job.target);
+            target = await resolve(job.target, Boolean(displayName || avatarUrl));
             if (targetOverlapsSource(context.currentConfig.snapshot, target.channel)
                 || [job.target, target.channel.parent_id].includes(context.event.channelId)
                 || (context.event.parentChannelId && job.target === context.event.parentChannelId)) throw new Error("target_source_overlap");
         } catch (error) {
             const code = error instanceof Error && [
-                "invalid_webhook_url", "webhook_identity_unavailable", "webhook_channel_mismatch", "missing_discord_bot_token",
+                "invalid_webhook_url", "webhook_identity_unavailable", "webhook_channel_mismatch", "missing_discord_bot_token", "missing_discord_webhook",
                 "bot_identity_unavailable", "discord_identity_not_bot", "bot_token_required_to_verify_channel_safety",
                 "target_channel_unresolved", "target_channel_invalid", "target_source_overlap",
             ].includes(error.message) ? error.message : discordNetworkFailure(error) ?? "target_safety_not_established";
@@ -114,7 +118,9 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
         try {
             const response = await request(target.url, {
                 method: "POST", headers: { ...target.headers, "Content-Type": "application/json" },
-                body: JSON.stringify({ ...JSON.parse(job.body), ...(target.webhook ? {} : { nonce, enforce_nonce: true }) }),
+                body: JSON.stringify({ ...JSON.parse(job.body), ...(target.webhook
+                    ? { ...(displayName ? { username: displayName } : {}), ...(avatarUrl ? { avatar_url: avatarUrl } : {}) }
+                    : { nonce, enforce_nonce: true }) }),
             });
             responseStatus = response.status;
             if (response.status >= 400 && response.status < 500 && response.status !== 408) {

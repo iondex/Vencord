@@ -112,13 +112,49 @@ test("X links require a matching source route and keep text or embed-only URLs t
         }
         throw new Error("unexpected test request");
     }) as typeof fetch);
-    for (const url of urls) {
+    for (let index = 0; index < urls.length; index++) {
         await sender.send(store.claim("deliver"));
-        assert.ok(posted.at(-1).content.includes(url));
         assert.deepEqual(posted.at(-1).allowed_mentions, { parse: [] });
     }
+    for (const url of urls) assert.ok(posted.some(body => body.content.includes(url) || body.embeds?.some((embed: any) => embed.url === url)));
     assert.ok(rows(store, "jobs").every(job => job.state === "sent"));
     assert.equal(rows(store, "route_receipts").length, 3);
+});
+
+test("channel profiles use the configured webhook identity and preserve rich news embeds", async context => {
+    const store = fixture(context);
+    const config = configuration();
+    config.profiles = [{ targetChannelId: "5", displayName: "富途资讯", avatarUrl: "https://cdn.test/futu.png" }];
+    store.installConfig(config);
+    ingest(store, capture("100", { message: { id: "100", content: "", author: { id: "4" }, embeds: [{ title: "新闻", description: "正文", color: 5763719 }] } }));
+    planMessages(store, []);
+    const sent: any[] = [];
+    const sender = createDiscordSender(store, { botToken: "test", webhooks: { "5": "https://discord.com/api/webhooks/10/test-token" } }, [], (async (input: any, init?: RequestInit) => {
+        if (init?.method === "POST") { sent.push(JSON.parse(String(init.body))); return json({ id: "200", channel_id: "5" }); }
+        if (String(input).includes("/webhooks/10/")) return json({ id: "10", channel_id: "5" });
+        if (String(input).endsWith("/channels/5")) return json({ id: "5", guild_id: "2" });
+        throw new Error("unexpected request");
+    }) as typeof fetch);
+    await sender.send(store.claim("deliver"));
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].username, "富途资讯");
+    assert.equal(sent[0].avatar_url, "https://cdn.test/futu.png");
+    assert.equal(sent[0].content, "");
+    assert.deepEqual(sent[0].embeds, [{ title: "新闻", description: "正文", color: 5763719 }]);
+    assert.equal(rows(store, "sender_history")[0].identity, "webhook:10");
+});
+
+test("a configured channel identity never silently falls back to the bot account", async context => {
+    const store = fixture(context);
+    const config = configuration();
+    config.profiles = [{ targetChannelId: "5", displayName: "富途资讯", avatarUrl: "" }];
+    store.installConfig(config);
+    ingest(store, capture()); planMessages(store, []);
+    let calls = 0;
+    const sender = createDiscordSender(store, { botToken: "test" }, [], (async () => { calls++; throw new Error("unexpected request"); }) as typeof fetch);
+    await sender.send(store.claim("deliver"));
+    assert.equal(calls, 0);
+    assert.equal(rows(store, "jobs")[0].error, "missing_discord_webhook");
 });
 
 test("own outputs cannot generate jobs before ACK, after ACK, after restart or during replay", async context => {

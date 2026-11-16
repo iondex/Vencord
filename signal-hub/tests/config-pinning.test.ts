@@ -198,6 +198,7 @@ test("extraction retries retain pinned model, endpoint, replacements, whitelist 
     assert.equal(signals.length, 1);
     assert.equal(signals[0].target, "6");
     assert.equal(signals[0].config_hash, extraction.config_hash);
-    assert.match(JSON.parse(signals[0].body).content, /Pinned route/);
+    assert.match(JSON.parse(signals[0].body).content, /pinned entry/);
+    assert.doesNotMatch(JSON.parse(signals[0].body).content, /来源|Pinned route|Changed route/);
     assert.equal((store.db.prepare("SELECT state FROM jobs WHERE id=?").get(extraction.id) as any).state, "done");
 });
