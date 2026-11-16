@@ -342,7 +342,7 @@ Local 标签的“本机持久队列”除 pending/acked/quarantine 外，会单
 
 隔离原因写在 `spool/forwarder/quarantine-reasons`，原始文件继续放在 `quarantine`。HTTP 400/413/422 在修复接收地址、协议版本或请求大小限制后，可以在 Local 设置中主动点击“重交可恢复记录”。工具检查原 envelope、body hash、eventId 文件名及 pending/acked 冲突，只移回原待交接队列。原因记录暂时保留用于检查，console 不记录正文或凭据。
 
-HTTP 409、无原因元数据的历史隔离、损坏/被改写文件及同名 pending/acked 全部保留检查。重复隔离不会覆盖旧证据。这是采集交接恢复，不会释放 Hub 的 uncertain，也不会重放测试模式过滤和时间截止之前的历史投递。服务端仍按现有入库去重、时间边界、路由和防循环条件决定是否投递。
+HTTP 409、无原因元数据的历史隔离、损坏/被改写文件及同名 pending/acked 全部保留检查。重复隔离保留两份原始记录并标记 `capture_conflict`，不覆盖旧证据、不允许盲重交，也不阻塞后续消息。这是采集交接恢复，不会释放 Hub 的 uncertain，也不会重放测试模式过滤和时间截止之前的历史投递。服务端仍按现有入库去重、时间边界、路由和防循环条件决定是否投递。
 
 ## 验证
 

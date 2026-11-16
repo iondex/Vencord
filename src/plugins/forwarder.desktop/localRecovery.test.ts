@@ -148,8 +148,13 @@ test("repeated rejection cannot overwrite an existing quarantined capture", asyn
     const event = capture();
     event.message.content = "a different capture with the same identity";
     transport.enqueue(event);
+    transport.enqueue(capture("99"));
     await transport.drain();
     assert.equal(readFileSync(join(root, "quarantine", file), "utf8"), original);
-    assert.equal(transport.status().pending, 1);
-    assert.deepEqual(transport.retryQuarantined(), { requeued: 0, held: 1 });
+    assert.equal(transport.status().pending, 0);
+    assert.equal(transport.status().quarantined, 3);
+    assert.equal(transport.status().quarantineReasons.find(item => item.reason === "capture_conflict")?.total, 2);
+    const contents = readdirSync(join(root, "quarantine")).map(name => JSON.parse(readFileSync(join(root, "quarantine", name), "utf8")).message.content);
+    assert.ok(contents.includes(event.message.content));
+    assert.deepEqual(transport.retryQuarantined(), { requeued: 1, held: 2 });
 });

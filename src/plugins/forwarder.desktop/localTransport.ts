@@ -136,11 +136,16 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
     }
 
     function quarantine(directory: string, file: string, reason: string, body: string) {
-        if (existsSync(join(directory, "quarantine", file))) throw new Error("An existing quarantined capture needs review before replacing it");
         const reasons = join(directory, "quarantine-reasons");
-        atomicWrite(join(reasons, `${file}.json`), JSON.stringify({ reason, hash: createHash("sha256").update(body).digest("hex"), at: Date.now() }));
+        const collision = existsSync(join(directory, "quarantine", file));
+        if (collision) {
+            const previous = quarantineReason(file);
+            atomicWrite(join(reasons, `${file}.json`), JSON.stringify({ reason: "capture_conflict", previousReason: previous.reason, hash: previous.hash, at: Date.now() }));
+        }
+        const quarantinedFile = collision ? `${file}.${randomUUID()}.json` : file;
+        atomicWrite(join(reasons, `${quarantinedFile}.json`), JSON.stringify({ reason: collision ? "capture_conflict" : reason, hash: createHash("sha256").update(body).digest("hex"), at: Date.now() }));
         syncDirectory(reasons);
-        renameSync(join(directory, "pending", file), join(directory, "quarantine", file));
+        renameSync(join(directory, "pending", file), join(directory, "quarantine", quarantinedFile));
         syncDirectory(join(directory, "quarantine"));
         syncDirectory(join(directory, "pending"));
     }
@@ -346,7 +351,7 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
             const quarantineReasons = new Map<string, number>();
             for (const file of files("quarantine")) {
                 const { reason } = quarantineReason(file);
-                const safeReason = ["http_400", "http_409", "http_413", "http_422", "invalid_capture"].includes(reason) ? reason : "unknown";
+                const safeReason = ["http_400", "http_409", "http_413", "http_422", "invalid_capture", "capture_conflict"].includes(reason) ? reason : "unknown";
                 quarantineReasons.set(safeReason, (quarantineReasons.get(safeReason) ?? 0) + 1);
             }
             const acked = files("acked").filter(file => file.endsWith(".json")).length;
