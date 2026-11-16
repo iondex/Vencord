@@ -11,6 +11,7 @@ export interface LocalServiceStatus {
     service: "signal-hub";
     protocol: 2;
     paused: boolean;
+    testMode?: boolean;
     configSyncedAt: string | null;
     routes: LocalRoute[];
     jobs: { state: string; total: number; }[];

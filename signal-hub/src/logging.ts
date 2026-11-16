@@ -25,6 +25,7 @@ function consoleMessage(event: string, fields: Record<string, unknown>) {
         config_sync_failed_using_cache: "Configuration sync failed; using cache", capture_committed: "Capture saved",
         capture_quarantined: "Capture quarantined", message_planned: "Message planned", delivery_sent: "Delivered",
         delivery_finished: "Delivery pending", delivery_repair_scheduled: "Delivery repair scheduled", route_test_queued: "Route test queued",
+        test_mode_changed: "Test mode changed",
     };
     const states: Record<string, string> = {
         pending: "queued", leased: "preparing", sending: "sending", sent: "sent", retry_wait: "awaiting repair",
@@ -34,6 +35,8 @@ function consoleMessage(event: string, fields: Record<string, unknown>) {
     const details: string[] = [];
     if (fields.host !== undefined) details.push(`${fields.host}:${fields.port}`);
     if (fields.proxy) details.push("proxy enabled");
+    if (fields.testMode) details.push("test mode: futu-news only");
+    if (event === "test_mode_changed") details.push(fields.enabled ? "futu-news only" : "all configured routes");
     if (fields.routeName || fields.routeId) details.push(`route ${fields.routeName || fields.routeId}`);
     if (fields.target) details.push(`→ ${fields.target}`);
     if (fields.state && event !== "delivery_sent") details.push(states[String(fields.state)] ?? String(fields.state));

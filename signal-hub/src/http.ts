@@ -17,7 +17,7 @@ function json(response: ServerResponse, status: number, body: unknown) {
     response.end(JSON.stringify(body));
 }
 
-export function createHubHttp(store: Store, options: { pairingToken: string; adminToken: string; excludedServerIds?: string[]; maxBodyBytes?: number; log?: (event: string, fields?: any) => void; wake?: () => void; }) {
+export function createHubHttp(store: Store, options: { pairingToken: string; adminToken: string; excludedServerIds?: string[]; maxBodyBytes?: number; log?: (event: string, fields?: any) => void; wake?: () => void; setTestMode?: (enabled: boolean) => void; }) {
     return createServer(async (request, response) => {
         try {
             const url = new URL(request.url ?? "/", "http://signal-hub.local");
@@ -55,7 +55,7 @@ export function createHubHttp(store: Store, options: { pairingToken: string; adm
                 json(response, 200, { ok: true });
                 return;
             }
-            if (request.method === "POST" && url.pathname === "/api/local/test") {
+            if (request.method === "POST" && ["/api/local/test", "/api/local/test-mode"].includes(url.pathname)) {
                 const chunks: Buffer[] = [];
                 let bytes = 0;
                 for await (const chunk of request) {
@@ -65,6 +65,15 @@ export function createHubHttp(store: Store, options: { pairingToken: string; adm
                 }
                 let input: any;
                 try { input = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { json(response, 400, { error: "malformed_json" }); return; }
+                if (url.pathname === "/api/local/test-mode") {
+                    if (typeof input?.enabled !== "boolean") { json(response, 400, { error: "invalid_test_mode" }); return; }
+                    if (options.setTestMode) options.setTestMode(input.enabled);
+                    else store.setMetadata("test_mode", String(input.enabled));
+                    options.log?.("test_mode_changed", { enabled: input.enabled });
+                    json(response, 200, localServiceStatus(store, options.excludedServerIds ?? []));
+                    options.wake?.();
+                    return;
+                }
                 if (!input || typeof input.requestId !== "string" || !/^[a-f\d-]{36}$/.test(input.requestId)
                     || typeof input.routeId !== "string" || !input.routeId || input.routeId.length > 512) {
                     json(response, 400, { error: "invalid_test_request" }); return;

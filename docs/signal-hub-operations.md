@@ -1,6 +1,6 @@
 # Signal-hub 本地服务运行说明
 
-开发分支：`local`。`iondex/local` 是远端 `iondex` 上 `local` 分支的引用，本地及 GitHub 分支名称均为 `local`。文本链路使用独立 Node 服务，CF 保留配置界面。未在生产 Discord 目标启用发送。
+开发分支：`local`。`iondex/local` 是远端 `iondex` 上 `local` 分支的引用，本地及 GitHub 分支名称均为 `local`。文本链路使用独立 Node 服务，CF 保留配置界面。当前实机测试使用测试模式，仅向 `futu-news` 对应目标投递。
 
 过渡期的 CF 兼容要求约束插件 `remote` 模式：继续使用 legacy payload 与旧版 CF Worker 通信。`local` 使用独立的 v2 采集协议，不模拟旧 Worker，也不自动向 CF 消息入口回退。参考新 CF 架构不改变这个兼容边界。
 
@@ -29,11 +29,17 @@ pnpm hub
     "excludedServerIds": [],
     "loggerDatabase": "",
     "recoveryAccountId": "",
-    "botHistoryEnabled": false
+    "botHistoryEnabled": false,
+    "testMode": false,
+    "forwardAfter": ""
 }
 ```
 
 内网部署时在服务机器将 `host` 改为 `"0.0.0.0"`，按需修改 `port`；在 Discord 的插件设置页填写服务可访问的内网 URL，例如 `http://192.168.1.50:49321/forward`，不要填写 `0.0.0.0`。修改服务监听设置后重启服务；插件连接设置按页面提示重启 Discord。
+
+`testMode` 是服务端的测试开关。开启时仅放行 CF 配置中名称为 `futu-news` 的已启用路由及其来源频道；找不到该路由时不发送。其他采集消息仍归档，标记 `test_mode_filtered`，不生成投递或 Signal 任务。插件 Local 页成功“检查本地 API”后可点击“开启测试模式 / 关闭测试模式”，修改立即生效并写回服务机器的 `settings.json`，无需重启。关闭不会补发测试期间已过滤的消息。已发出的网络请求可能仍完成，尚在预检阶段的任务会在发送前再次检查开关。
+
+`forwardAfter` 是可选的 ISO 时间边界，用于重置后不再处理旧积压；只允许原消息时间不早于此边界的消息生成投递，缺少有效原消息时间也会被拦截。插件旧队列、历史恢复重新交接的老消息会被归档为 `before_forward_cutoff`，不会重新发出。该值不会在重启或切换测试模式时自动刷新。当前测试配置已设为本轮数据库重置时间，日常新部署默认留空。
 
 原有环境变量覆盖仍保留，供临时运维使用；日常配置以 JSON 为准。自定义运行目录时，配置、启动、status、backup 和 watchdog 都应使用相同的 `SIGNAL_HUB_VAR`。
 
@@ -53,6 +59,8 @@ HTTPS_PROXY=http://127.0.0.1:7890 pnpm hub
 
 - `var/settings.json`：监听地址、端口、CF 配置源、排除的 Discord server 和历史恢复设置。
 - `var/secrets.json`：保留 `pairingToken`、`adminToken` 设置，两者默认均为 `""`，分别表示采集入口、管理 API 无需 token；Discord Bot、模型、CF 及告警凭据默认留空。
+
+CF 的 `/api/admin/target-channel-profiles` 提供目标频道的名称、头像配置，随五分钟配置同步缓存。Local 投递使用任务固定的配置快照，按目标选择对应身份；有名称或头像的目标必须在 `secrets.json` 的 `webhooks` 中配置该频道的 Webhook URL，不能静默改用 Bot 身份。Webhook URL 属于凭据，不放入普通配置或日志。可以使用 Bot 只读列出现有频道 Webhook，复用旧 CF 已创建的 `Signal-Hub` Webhook；发送仍会核对实际身份、目标频道与来源重叠。失效目标或缺失 Webhook 会保留任务并告警，不自动创建替代身份。
 
 不再生成 `plugin-connection.json`。插件连接由 Discord 内的 forwarder 设置页保存，服务不读取该旧文件；已有文件不会被脚本删除。令牌只写入凭据文件，不输出到控制台，也不会因重复 configure 而轮换。
 
@@ -169,6 +177,8 @@ Signal 使用固定参考版本的纯解析模块；普通投送和模型输入�
 
 所有命中启用 route 的消息都会留下 `route_receipts`，包括已排队、关键词/中文拦截、不支持类型、安全拦截和 route 冲突的原因；冲突时保留各 route 的记录并告警。可发送的消息在同一事务内生成持久化 jobs，消息分段和各目标分别记录任务。每次发送前检查或 HTTP 尝试都记录在 `delivery_attempts`，包含开始/结束时间、结果、HTTP 状态和安全错误码。`sink_deliveries` 保留稳定 nonce、发送意图和成功后的 Discord message ID。
 
+调度器每 250ms 检查到期工作，最多同时处理 4 个目标，同一目标只允许一条活动投递，同一消息的分段依次发送。任务按到期时间和任务 ID 选取，不保证所有消息按原始发布时间严格排序；重试等待期间其他到期消息可以先发。普通消息没有自动过期时间，因此恢复网络后会继续发送旧积压；Signal 超过 15 分钟转人工检查。
+
 确定失败或发送前的失败统一由 SQLite 调度：首次失败后最多再重试 **5 次**，延迟为 **1、2、4、8、16 秒**；429 的服务端等待时间优先取较大值。这里是“首次尝试 + 5 次重试”，最多 6 次。模型 SDK 内部重试关闭，避免隐藏的重试层。网络等待不占用同步 sleep，也不在插件里增加路由或发送逻辑。
 
 本轮耗尽后进入 `retry_wait`，保留完整记录，最早 5 分钟后补发。独立修复任务每 60 秒扫描到期项，增加 `recovery_cycles`、重置本轮计数并交回同一发送池。新任务使用实际入队时间作为到期时间，避免持续新增任务以 `due_at=0` 永久抢在已到期重试前面。进程重启后仍从数据库恢复。修复不会绕过暂停、当前 route 禁用/来源变更/多 route 冲突、当前 Signal 关闭、排除名单及防回流检查。
@@ -239,6 +249,8 @@ SIGNAL_HUB_LOG_LEVEL=debug pnpm hub
 
 ### 排队数量、测试按钮及投递预检
 
+本轮按要求备份并清空活动数据库，旧投递任务不会进入新库；备份只供人工恢复，服务不会扫描并重放。`forwardAfter` 另外拦截插件残留队列或历史恢复带回的旧消息。
+
 “服务任务（含分段）”按任务状态计数，并非原始消息数；长消息分段和 Signal 工作会增加任务数。“本机队列已交接”表示服务已保存，与目标成功发送是两个阶段。暂停期间仍会规划任务，所以排队数量可以增长。设置页的服务状态来自上次点击“检查本地 API”的结果，不会自动跟随后续的暂停、恢复或服务停止更新；修改状态后需重新检查。
 
 “测试转发”要求已成功检查服务、选择可用路由且投递未暂停；同一路由已有未完成测试时也会禁用，使用“刷新结果”查看现有测试。`POST /api/resume` 恢复的是全部到期工作，包含积压消息，不能用它只放行单条测试；停止服务后应先确认凭据、路由及积压，再安排重新启动。
@@ -248,6 +260,7 @@ SIGNAL_HUB_LOG_LEVEL=debug pnpm hub
 | 错误码 | 检查项 |
 | --- | --- |
 | `missing_discord_bot_token` | 在服务 `secrets.json` 填写 `botToken`，或通过 `DISCORD_BOT_TOKEN` 注入；插件的连接令牌不能代替 Bot token |
+| `missing_discord_webhook` | 目标配置了独立名称或头像，但缺少对应 `webhooks` 凭据；取回旧 Webhook 并重启服务 |
 | `bot_identity_unavailable` / `discord_identity_not_bot` | 验证凭据有效且属于 Bot 账号 |
 | `bot_token_required_to_verify_channel_safety` | Webhook 投递同样需要 Bot token 核对目标所属服务器和父频道 |
 | `target_channel_unresolved` / `target_channel_invalid` | Bot 能否访问目标频道，目标是否有效 |
@@ -263,6 +276,8 @@ SIGNAL_HUB_LOG_LEVEL=debug pnpm hub
 随后已从旧服务配置迁移 Bot token 到本地 `secrets.json`。再次复现发现 Node 直连 Discord 超时，但使用现有 HTTP 代理后，Bot 身份和目标频道查询均返回 HTTP 200。代理支持修复了此网络路径；该只读检查未实际发送消息，也不代表已验证发送权限。预检仍会检查目标与来源重叠，任何预检失败均保留任务和尝试记录；具体预检错误不会再使健康检查误报恢复。发送请求发出后的超时仍进入不确定状态并等待对账，不会按预检失败盲目重发。
 
 ### X / Twitter 链接未转发的排查
+
+普通转发保留原始正文和 Discord embed 卡片结构：标题、Markdown 描述、链接、颜色、原始作者、页脚、时间、字段及图片按 Discord 可发送字段输出，兼容 Vencord 的 `rawTitle` / `rawDescription` 与图标字段别名。卡片文本不再重复摊进正文，不添加来源频道、路由名或 Discord 原消息跳转链接；正文、卡片和生成的 Signal 文本均移除用户、角色、频道提及及 `@everyone` / `@here`，并移除指向来源频道的链接，同时使用空 `allowed_mentions`。原消息中的新闻站链接、原始“信源”页脚和格式保留，`forwardImages` 控制媒体图片。正文过长、超过 10 张卡片或每条投递的卡片文字总计超过 6000 字符时分成顺序任务，单个字段超出 Discord 限制则裁剪。
 
 先按原消息的 `messageKey` 查询 `/api/deliveries?messageKey=discord:<serverId>:<channelId>:<messageId>`，确认是否归档、是否匹配 route、是否已有任务及发送尝试。`capture_committed` 或 HTTP 202 只说明保存成功，不能证明进入投递。`message_planned` 中的 `no_matching_route` 表示未生成投递任务；此时应核对 CF 配置的来源，而不是重试 Discord 发送。
 

@@ -4,12 +4,22 @@ import type { HubLog } from "./logging.js";
 import { matchingRoutes, renderMessage } from "./routing.js";
 import { Store } from "./storage.js";
 
+export function testModeAllowsRoute(store: Store, route: { name: string; }) {
+    return store.metadata("test_mode") !== "true" || route.name.trim().toLowerCase() === "futu-news";
+}
+
 export function safetyState(store: Store, event: CaptureEnvelope, excludedServerIds: string[]) {
     const own = store.ownOutput(event);
     if (own) return own;
     if (event.message.author?.id === event.accountId) return "filtered_self";
     if (excludedServerIds.includes(event.serverId)) return "excluded_server";
     if (event.excludedServerIds.includes(event.serverId)) return "safety_pending";
+    const cutoff = store.metadata("forward_after");
+    if (cutoff && (!(typeof event.message.timestamp === "string" && Number.isFinite(Date.parse(event.message.timestamp)))
+        || Date.parse(event.message.timestamp) < Date.parse(cutoff))) return "before_forward_cutoff";
+    const testConfiguration = store.metadata("test_mode") === "true" ? store.config() : undefined;
+    if (testConfiguration && !testConfiguration.snapshot.routes.some(route => route.enabled
+        && testModeAllowsRoute(store, route) && route.serverId === event.serverId && route.channelId === event.channelId)) return "test_mode_filtered";
 }
 
 export function planMessages(store: Store, excludedServerIds: string[], limit = 100, log?: HubLog) {
@@ -50,7 +60,7 @@ export function planMessages(store: Store, excludedServerIds: string[], limit = 
                 }
                 state = rendering.reason;
                 for (const [part, body] of rendering.parts.entries()) store.enqueue(row.message_key, "deliver", route.routeId, route.targetChannelId, part, body, config.hash);
-                if (rendering.parts.length && signalEnabled(config.snapshot, route.routeId)) {
+                if (rendering.parts.length && store.metadata("test_mode") !== "true" && signalEnabled(config.snapshot, route.routeId)) {
                     const timestamp = Date.parse(typeof event.message.timestamp === "string" ? event.message.timestamp : event.capturedAt);
                     if (!Number.isFinite(timestamp) || Date.now() - timestamp > 15 * 60_000) {
                         store.enqueue(row.message_key, "extract", route.routeId, "", 0, {}, config.hash);
@@ -81,6 +91,7 @@ export function executable(store: Store, job: any, excludedServerIds: string[]) 
     const route = config?.snapshot.routes.find(route => route.routeId === job.route_id && route.enabled);
     const safety = safetyState(store, event, excludedServerIds);
     if (safety || !config || !route || !currentConfig || store.metadata("paused") === "true") return undefined;
+    if (!testModeAllowsRoute(store, route) || (store.metadata("test_mode") === "true" && job.kind !== "deliver")) return undefined;
     if (row.state === "route_test") {
         const currentRoute = currentConfig.snapshot.routes.find(candidate => candidate.routeId === route.routeId && candidate.enabled);
         if (job.kind !== "deliver" || !currentRoute || currentRoute.serverId !== route.serverId

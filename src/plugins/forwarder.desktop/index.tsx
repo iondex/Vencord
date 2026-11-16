@@ -380,6 +380,7 @@ function LocalTransportSettings() {
     const { localServerUrl, localPairingToken, excludedServerIds } = settings.use(["localServerUrl", "localPairingToken", "excludedServerIds"]);
     const [status, setStatus] = useState<Awaited<ReturnType<typeof Native.localStatus>> | null>(null);
     const [service, setService] = useState<LocalServiceStatus | null>(null);
+    const [changingMode, setChangingMode] = useState(false);
     const [health, setHealth] = useState<HealthCheckState>({ status: "idle", message: "尚未检查服务状态。" });
     const [routeId, setRouteId] = useState("");
     const [test, setTest] = useState<LocalRouteTest | null>(null);
@@ -400,6 +401,7 @@ function LocalTransportSettings() {
         setTestRequest(null);
         setTestMessage("");
         setTesting(false);
+        setChangingMode(false);
         setHealth({ status: "idle", message: "连接配置已就绪，请检查服务状态。" });
     }, [localServerUrl, localPairingToken, excludedServerIds]);
 
@@ -463,6 +465,18 @@ function LocalTransportSettings() {
         finally { if (currentConnection()) setTesting(false); }
     }
 
+    async function toggleTestMode() {
+        if (!service || changingMode) return;
+        setChangingMode(true);
+        try {
+            const result = await Native.setLocalTestMode(connection, !service.testMode);
+            if (!currentConnection()) return;
+            if (result.ok) { setService(result.data); setRouteId(""); }
+            else setTestMessage(result.message);
+        } catch { if (currentConnection()) setTestMessage("切换失败，请重新检查服务状态。"); }
+        finally { if (currentConnection()) setChangingMode(false); }
+    }
+
     const stateLabels: Record<string, string> = {
         pending: "排队中", leased: "准备投递", sending: "发送中", sent: "已送达",
         retry_wait: "等待重试", uncertain: "待对账", held: "已暂缓",
@@ -477,6 +491,10 @@ function LocalTransportSettings() {
             <HealthLine label="Signal-hub（上次检查）" health={health} />
             {service && <>
                 {service.paused && <Paragraph>仅采集归档。POST /api/resume 后重新检查。</Paragraph>}
+                {typeof service.testMode === "boolean" && <Flex gap="8px">
+                    <Button variant="secondary" onClick={toggleTestMode} disabled={changingMode}>{service.testMode ? "关闭测试模式" : "开启测试模式"}</Button>
+                    <Paragraph>测试模式：{service.testMode ? "开启，仅转发 futu-news" : "关闭"}</Paragraph>
+                </Flex>}
                 <Paragraph>可用路由 {routes.length} · 配置同步 {service.configSyncedAt ? new Date(Number(service.configSyncedAt)).toLocaleString() : "暂无"}</Paragraph>
                 <Paragraph>服务任务（含分段）：{service.jobs.map(job => `${stateLabels[job.state] ?? "其他"} ${job.total}`).join(" · ") || "0"}</Paragraph>
                 <Select

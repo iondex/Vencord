@@ -30,6 +30,7 @@ async function checkPluginModeLifecycle() {
     const hookValues: any[] = [];
     let hookCursor = 0;
     let paused = true;
+    let testMode = false;
     let delivered = false;
     let loseTestResponse = true;
     const testIds: string[] = [];
@@ -44,9 +45,13 @@ async function checkPluginModeLifecycle() {
         async send() { sentRemote++; return { ok: true }; },
         async localStatus() { return { active: false, pending: 0, staged: 0, acked: 0, quarantined: 0, consecutiveFailures: 0, oldestPendingAt: null, lastAcknowledgedAt: null }; },
         async checkLocalService() {
-            return { ok: true, data: { service: "signal-hub", protocol: 2, paused, configSyncedAt: null, jobs: [], routes: [
+            return { ok: true, data: { service: "signal-hub", protocol: 2, paused, testMode, configSyncedAt: null, jobs: [], routes: [
                 { routeId: "route", name: "测试目标", enabled: true, serverId: "4", targetChannelId: "6", excluded: false },
             ] } };
+        },
+        async setLocalTestMode(_connection: unknown, enabled: boolean) {
+            testMode = enabled;
+            return native.checkLocalService();
         },
         async testLocalRoute(_connection: unknown, routeId: string, requestId: string) {
             testIds.push(requestId);
@@ -127,6 +132,12 @@ async function checkPluginModeLifecycle() {
     assert.equal(button(panel, "测试转发"), undefined, "A route test requires a successful service check");
     await button(panel, "检查本地 API").props.onClick();
     panel = render();
+    await button(panel, "开启测试模式").props.onClick();
+    panel = render();
+    assert.match(text(panel), /开启，仅转发 futu-news/);
+    await button(panel, "关闭测试模式").props.onClick();
+    panel = render();
+    assert.equal(testMode, false);
     const select = elements(panel).find(element => typeof element.props?.select === "function");
     select.props.select("route");
     panel = render();

@@ -65,6 +65,10 @@ export function testLocalRoute(_: IpcMainInvokeEvent, connection: LocalConnectio
     return localApi<LocalRouteTest>(connection, "/api/local/test", { routeId, requestId });
 }
 
+export function setLocalTestMode(_: IpcMainInvokeEvent, connection: LocalConnection, enabled: boolean) {
+    return localApi<LocalServiceStatus>(connection, "/api/local/test-mode", { enabled });
+}
+
 export function localTestStatus(_: IpcMainInvokeEvent, connection: LocalConnection, requestId: string) {
     if (!/^[a-f\d-]{36}$/.test(requestId)) return Promise.resolve({ ok: false as const, message: "测试编号无效" });
     return localApi<LocalRouteTest>(connection, `/api/local/tests/${requestId}`);

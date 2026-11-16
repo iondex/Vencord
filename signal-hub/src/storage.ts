@@ -200,6 +200,8 @@ export function openStore(path: string) {
             routed: db.prepare("SELECT decision,count(*) AS total FROM route_receipts GROUP BY decision").all(),
             observedAt: Date.now(),
             paused: metadata("paused") === "true",
+            testMode: metadata("test_mode") === "true",
+            forwardAfter: metadata("forward_after") ?? "",
             backlog: backlog(),
             quarantined: db.prepare("SELECT reason,count(*) AS total,max(created_at) AS latestAt FROM quarantine GROUP BY reason").all(),
             configHash: metadata("config_hash") ?? null,

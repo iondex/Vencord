@@ -48,6 +48,8 @@ if (command === "init") {
         store.close();
     } else if (configuration) {
         const { settings, secrets } = configuration;
+        store.setMetadata("test_mode", String(settings.testMode));
+        store.setMetadata("forward_after", settings.forwardAfter);
         const network = configureNetwork();
         const log = createLogger(join(runtimeDirectory, "logs"));
         const { excludedServerIds } = settings;
@@ -122,7 +124,15 @@ if (command === "init") {
                 }
             }
         }
-        const server = createHubHttp(store, { pairingToken: secrets.pairingToken, adminToken: secrets.adminToken, excludedServerIds, log, wake: tick });
+        const server = createHubHttp(store, {
+            pairingToken: secrets.pairingToken, adminToken: secrets.adminToken, excludedServerIds, log, wake: tick,
+            setTestMode(enabled) {
+                const path = join(runtimeDirectory, "settings.json");
+                const current = JSON.parse(readFileSync(path, "utf8"));
+                writeDurable(path, JSON.stringify({ ...current, testMode: enabled }, null, 4));
+                store.setMetadata("test_mode", String(enabled));
+            },
+        });
         server.requestTimeout = 30_000;
         server.headersTimeout = 15_000;
         const intervals: ReturnType<typeof setInterval>[] = [];
@@ -137,7 +147,7 @@ if (command === "init") {
         }
         server.on("error", () => { log("listen_failed"); void shutdown(); process.exitCode = 1; });
         server.listen(settings.port, settings.host, () => {
-            log("hub_started", { host: settings.host, port: settings.port, proxy: Boolean(network) });
+            log("hub_started", { host: settings.host, port: settings.port, proxy: Boolean(network), testMode: settings.testMode });
             tick();
             void background("config_sync_failed", sync);
             intervals.push(setInterval(tick, 250));

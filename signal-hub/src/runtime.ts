@@ -15,6 +15,8 @@ const settingsSchema = z.object({
     loggerDatabase: z.string().default(""),
     recoveryAccountId: z.string().regex(/^\d{1,32}$|^$/).default(""),
     botHistoryEnabled: z.boolean().default(false),
+    testMode: z.boolean().default(false),
+    forwardAfter: z.string().datetime({ offset: true }).or(z.literal("")).default(""),
 });
 const secretsSchema = z.object({
     pairingToken: z.string().min(24).or(z.literal("")).default(""),
