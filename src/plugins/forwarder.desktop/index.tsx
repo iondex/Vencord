@@ -8,7 +8,6 @@ import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Flex } from "@components/Flex";
-import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { OptionComponentMap } from "@components/settings/tabs/plugins/components";
 import { Devs } from "@utils/constants";
@@ -43,7 +42,7 @@ const settings = definePluginSettings({
     localServerUrl: {
         type: OptionType.STRING,
         displayName: "本地服务地址",
-        description: "Signal-hub 的消息接收地址，可以在本机或内网机器上运行。",
+        description: "本机或内网 Signal-hub 地址。",
         placeholder: "http://127.0.0.1:49321/forward",
         default: "http://127.0.0.1:49321/forward",
         restartNeeded: true,
@@ -52,7 +51,7 @@ const settings = definePluginSettings({
     localPairingToken: {
         type: OptionType.STRING,
         displayName: "连接令牌（可选）",
-        description: "服务端 pairingToken 为空时无需填写；否则填写 secrets.json 中的同名值。",
+        description: "与服务端 pairingToken 一致，默认留空。",
         placeholder: "默认留空",
         componentProps: { type: "password" },
         default: "",
@@ -62,7 +61,7 @@ const settings = definePluginSettings({
     excludedServerIds: {
         type: OptionType.STRING,
         displayName: "排除的服务器",
-        description: "不采集这些 Discord 服务器的消息，多个 ID 用逗号或空格分隔；本地模式请同步配置 Signal-hub 的排除列表。两个模式共用此安全设置。",
+        description: "ID 用逗号或空格分隔；两个模式共用。",
         placeholder: "可选：服务器 ID",
         default: "",
         restartNeeded: true,
@@ -71,7 +70,7 @@ const settings = definePluginSettings({
     serverUrl: {
         type: OptionType.STRING,
         displayName: "主转发地址",
-        description: "接收 Discord 通知消息的远程 HTTP 接口，兼容旧版 CF Worker。",
+        description: "兼容旧版 CF Worker 的接收接口。",
         placeholder: "请输入主转发地址",
         default: DEFAULT_SERVER_URL,
         hidden: true,
@@ -79,7 +78,7 @@ const settings = definePluginSettings({
     fallbackUrl: {
         type: OptionType.STRING,
         displayName: "备用转发地址",
-        description: "主接口重试耗尽后使用；留空则禁用。",
+        description: "主接口失败后使用，留空禁用。",
         placeholder: "留空禁用备用接口",
         default: DEFAULT_FALLBACK_URL,
         hidden: true,
@@ -87,7 +86,7 @@ const settings = definePluginSettings({
     enableDingTalkAlerts: {
         type: OptionType.BOOLEAN,
         displayName: "钉钉故障通知",
-        description: "主接口和备用接口均投递失败后，发送一条钉钉通知。",
+        description: "主、备用接口均失败时通知。",
         default: false,
         hidden: true,
     },
@@ -363,14 +362,6 @@ async function checkHealth(serverUrl: string) {
     catch { return { ok: false, status: -1, body: "暂时无法检查远程接口，请稍后重试" }; }
 }
 
-function StatsLine({ label, value }: { label: string; value: number; }) {
-    return (
-        <div>
-            <strong>{label}:</strong> {value}
-        </div>
-    );
-}
-
 function HealthLine({ label, health }: { label: string; health: HealthCheckState; }) {
     const color = health.status === "ok"
         ? "var(--text-positive)"
@@ -413,7 +404,7 @@ function LocalTransportSettings() {
     }, [localServerUrl, localPairingToken, excludedServerIds]);
 
     const check = async () => {
-        setHealth({ status: "checking", message: "正在检查服务状态和路由配置……" });
+        setHealth({ status: "checking", message: "正在检查……" });
         try {
             const [queue, result] = await Promise.all([Native.localStatus().catch(() => null), Native.checkLocalService(connection)]);
             if (!currentConnection()) return;
@@ -424,7 +415,7 @@ function LocalTransportSettings() {
                 return;
             }
             setService(result.data);
-            setHealth({ status: "ok", message: result.data.paused ? "服务可连接，但已暂停投递和信号解析。" : "服务可连接，投递未暂停。" });
+            setHealth({ status: "ok", message: result.data.paused ? "在线 · 投递已暂停" : "在线 · 投递运行中" });
         } catch {
             if (!currentConnection()) return;
             setService(null);
@@ -451,7 +442,7 @@ function LocalTransportSettings() {
                 if (cancelled) return;
                 if (result.ok) setTest(result.data);
                 else setTestMessage(result.message);
-            } catch { if (!cancelled) setTestMessage("查询中断，请点击刷新测试结果。"); }
+            } catch { if (!cancelled) setTestMessage("查询中断，请刷新结果。"); }
         }, 2000);
         return () => { cancelled = true; clearTimeout(timer); };
     }, [test, localServerUrl, localPairingToken]);
@@ -473,22 +464,21 @@ function LocalTransportSettings() {
     }
 
     const stateLabels: Record<string, string> = {
-        pending: "已入队，尚未确认送达", leased: "正在准备投递", sending: "正在发送", sent: "已确认送达 Discord",
-        retry_wait: "投递失败，等待重试和周期修复", uncertain: "发送结果待对账，请勿重复发送", held: "被安全检查或当前配置暂缓",
+        pending: "排队中", leased: "准备投递", sending: "发送中", sent: "已送达",
+        retry_wait: "等待重试", uncertain: "待对账", held: "已暂缓",
         review: "需要人工检查", dead: "投递失败，任务已保留",
     };
 
     return (
         <Flex flexDirection="column" gap="8px">
-            <Paragraph>采集服务器消息，经自发消息和排除列表过滤后交给 Signal-hub，统一保存、路由和转发。本机发送队列目录自动确定，无需配置。</Paragraph>
             <Flex gap="8px">
-                <Button onClick={check} disabled={health.status === "checking"}>{health.status === "checking" ? "正在检查……" : "检查本地 API 与发送队列"}</Button>
+                <Button onClick={check} disabled={health.status === "checking"}>{health.status === "checking" ? "正在检查……" : "检查本地 API"}</Button>
             </Flex>
             <HealthLine label="Signal-hub" health={health} />
             {service && <>
-                {service.paused && <Paragraph>暂停期间仍接收并保存消息，但不向 Discord 投递，也不执行信号解析。重启不会解除暂停；需要手动调用 POST /api/resume。测试按钮也会暂停使用。</Paragraph>}
-                <Paragraph>最近配置同步：{service.configSyncedAt ? new Date(Number(service.configSyncedAt)).toLocaleString() : "尚无缓存配置"}。可测试路由：{routes.length} 条。</Paragraph>
-                <Paragraph>服务任务：{service.jobs.map(job => `${stateLabels[job.state] ?? "其他状态"} ${job.total} 条`).join("；") || "暂无任务"}。</Paragraph>
+                {service.paused && <Paragraph>仅采集归档。恢复投递：POST /api/resume。</Paragraph>}
+                <Paragraph>可用路由 {routes.length} · 配置同步 {service.configSyncedAt ? new Date(Number(service.configSyncedAt)).toLocaleString() : "暂无"}</Paragraph>
+                <Paragraph>服务任务：{service.jobs.map(job => `${stateLabels[job.state] ?? "其他"} ${job.total}`).join(" · ") || "0"}</Paragraph>
                 <Select
                     options={routes.map(route => ({ label: `${route.name || route.routeId} → ${route.targetChannelId}`, value: route.routeId }))}
                     select={(value: string) => { setRouteId(value); }}
@@ -498,28 +488,22 @@ function LocalTransportSettings() {
                     maxVisibleItems={6}
                     closeOnSelect={true}
                 />
-                <Paragraph>点击后将向所选路由的目标频道真实发送一条标记为测试的消息，用于验证凭据、权限、防回流检查和投递链路；不执行消息内容过滤和信号解析。</Paragraph>
+                <Paragraph>向所选目标真实发送一条测试消息。</Paragraph>
                 <Flex gap="8px" flexWrap="wrap">
                     <Button onClick={sendTest} disabled={!selectedRoute || service.paused || testing || Boolean(test && test.routeId === routeId && test.state !== "sent")}>
-                        {testing ? "正在提交……" : testRequest && !test ? "重试提交测试" : "发送路由测试消息"}
+                        {testing ? "正在提交……" : testRequest && !test ? "重试提交" : "测试转发"}
                     </Button>
-                    {test && <Button variant="secondary" onClick={refreshTest}>刷新测试结果</Button>}
+                    {test && <Button variant="secondary" onClick={refreshTest}>刷新结果</Button>}
                 </Flex>
             </>}
             {testMessage && <Paragraph>{testMessage}</Paragraph>}
             {test && <>
-                <Paragraph>测试结果：{stateLabels[test.state] ?? "未知状态，请查看服务日志"}。已尝试 {test.attempts} 次。目标频道：{test.targetChannelId}。</Paragraph>
-                <Paragraph>测试编号：{test.requestId}。{test.error ? `诊断代码：${test.error}` : ""}</Paragraph>
+                <Paragraph title={test.requestId}>测试：{stateLabels[test.state] ?? "未知状态"} · 尝试 {test.attempts} 次{test.error ? ` · ${test.error}` : ""}</Paragraph>
             </>}
             {status && <>
-                <Paragraph>{status.active ? "本机发送队列运行中" : "本机发送队列未运行"}{status.lastError ? `：${status.lastError}` : ""}</Paragraph>
-                <StatsLine label="待交接的持久化消息" value={status.pending} />
-                <StatsLine label="等待恢复的暂存记录" value={status.staged} />
-                <StatsLine label="服务已确认保存的消息" value={status.acked} />
-                <StatsLine label="隔离记录" value={status.quarantined} />
-                <StatsLine label="连续交接失败次数" value={status.consecutiveFailures} />
-                <Paragraph>最早待发送：{status.oldestPendingAt === null ? "无" : new Date(status.oldestPendingAt).toLocaleString()}。最近确认保存：{status.lastAcknowledgedAt === null ? "本次会话暂无" : new Date(status.lastAcknowledgedAt).toLocaleString()}。</Paragraph>
-                {status.runtimeDirectory && <Paragraph>本机队列目录：{status.runtimeDirectory}</Paragraph>}
+                <Paragraph>本机队列：{status.active ? "运行中" : "未运行"} · 待交接 {status.pending} · 已交接 {status.acked} · 隔离 {status.quarantined}</Paragraph>
+                {(status.staged > 0 || status.consecutiveFailures > 0) && <Paragraph>暂存 {status.staged} · 连续失败 {status.consecutiveFailures}</Paragraph>}
+                {status.lastError && <Paragraph>{status.lastError}</Paragraph>}
             </>}
         </Flex>
     );
@@ -591,27 +575,15 @@ function RemoteTransportSettings() {
                 <Button onClick={() => void handleFallbackHealthCheck()} disabled={!fallbackUrl || fallbackHealth.status === "checking"}>
                     {fallbackHealth.status === "checking" ? "正在检查备用接口……" : "检查备用接口"}
                 </Button>
-                <Button variant="secondary" onClick={refreshStats}>
-                    刷新统计
-                </Button>
-                <Button onClick={clearStats}>
-                    清空统计
-                </Button>
+                <Button variant="secondary" onClick={refreshStats}>刷新统计</Button>
+                <Button variant="secondary" onClick={clearStats}>清空统计</Button>
             </Flex>
 
             <HealthLine label="主接口" health={primaryHealth} />
             <HealthLine label="备用接口" health={displayedFallbackHealth} />
 
             <div className={Margins.top8}>
-                <Heading tag="h3">运行统计</Heading>
-                <Paragraph>仅统计本次插件运行期间的数据。</Paragraph>
-                <Flex flexDirection="column" gap="4px" className={Margins.top8}>
-                    <StatsLine label="转发成功" value={statsSnapshot.forwarded} />
-                    <StatsLine label="转发失败" value={statsSnapshot.failed} />
-                    <StatsLine label="跳过自己发送的消息" value={statsSnapshot.filteredSelf} />
-                    <StatsLine label="跳过非服务器通知" value={statsSnapshot.filteredNonGuild} />
-                    <StatsLine label="被 Discord 通知规则过滤" value={statsSnapshot.filteredDiscord} />
-                </Flex>
+                <Paragraph>本次运行：成功 {statsSnapshot.forwarded} · 失败 {statsSnapshot.failed} · 过滤 {statsSnapshot.filteredSelf + statsSnapshot.filteredNonGuild + statsSnapshot.filteredDiscord}</Paragraph>
             </div>
         </Flex>
     );
@@ -631,9 +603,8 @@ function ForwarderSettings({ setValue, closePluginSettings }: PluginSettingCompo
                 <TabBar.Item id="local">本地（Local）</TabBar.Item>
                 <TabBar.Item id="remote">远程（Remote）</TabBar.Item>
             </TabBar>
-            <Paragraph>当前运行模式：{activeLabel}。切换标签页会保存模式选择，重启 Discord 后生效。</Paragraph>
-            {activeMode && activeMode !== mode && <Paragraph>待应用：{modeLabel}。重启前消息继续使用{activeLabel}，本页检查和测试使用正在编辑的服务地址。</Paragraph>}
-            {mode === "remote" && <Paragraph>遵循 Discord 通知规则，使用兼容旧版 CF Worker 的消息格式。此页的地址和告警设置仅用于远程模式。</Paragraph>}
+            <Paragraph>当前：{activeLabel} · 切换模式后重启生效。</Paragraph>
+            {activeMode && activeMode !== mode && <Paragraph>待切换：{modeLabel}。</Paragraph>}
             {fields.map(key => {
                 const setting = settings.def[key];
                 const Component = OptionComponentMap[setting.type];

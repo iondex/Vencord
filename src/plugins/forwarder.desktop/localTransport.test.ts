@@ -65,7 +65,6 @@ async function checkPluginModeLifecycle() {
         "@components/Button": { Button() {} },
         "@components/ErrorBoundary": { default: { wrap: (component: unknown) => component } },
         "@components/Flex": { Flex() {} },
-        "@components/Heading": { Heading() {} },
         "@components/Paragraph": { Paragraph() {} },
         "@components/settings/tabs/plugins/components": { OptionComponentMap: { 1() {}, 2() {} } },
         "@utils/constants": { Devs: { iondex: {} } },
@@ -125,28 +124,28 @@ async function checkPluginModeLifecycle() {
     const button = (tree: any, label: string) => elements(tree).find(element => typeof element.props?.onClick === "function" && text(element).includes(label));
     store.mode = "local";
     let panel = render();
-    assert.equal(button(panel, "发送路由测试消息"), undefined, "A route test requires a successful service check");
+    assert.equal(button(panel, "测试转发"), undefined, "A route test requires a successful service check");
     await button(panel, "检查本地 API").props.onClick();
     panel = render();
     const select = elements(panel).find(element => typeof element.props?.select === "function");
     select.props.select("route");
     panel = render();
-    assert.equal(button(panel, "发送路由测试消息").props.disabled, true, "Paused services cannot submit real route tests");
-    assert.match(text(panel), /暂停期间仍接收并保存/);
+    assert.equal(button(panel, "测试转发").props.disabled, true, "Paused services cannot submit real route tests");
+    assert.match(text(panel), /仅采集归档/);
     paused = false;
     await button(panel, "检查本地 API").props.onClick();
     panel = render();
-    assert.equal(button(panel, "发送路由测试消息").props.disabled, false);
-    await button(panel, "发送路由测试消息").props.onClick();
+    assert.equal(button(panel, "测试转发").props.disabled, false);
+    await button(panel, "测试转发").props.onClick();
     panel = render();
-    await button(panel, "重试提交测试").props.onClick();
+    await button(panel, "重试提交").props.onClick();
     assert.equal(testIds[0], testIds[1], "A lost test response must reuse its idempotency key");
     panel = render();
-    assert.match(text(panel), /已入队，尚未确认送达/);
-    assert.doesNotMatch(text(panel), /已确认送达 Discord/);
+    assert.match(text(panel), /排队中/);
+    assert.doesNotMatch(text(panel), /已送达/);
     delivered = true;
-    await button(panel, "刷新测试结果").props.onClick();
-    assert.match(text(render()), /已确认送达 Discord/);
+    await button(panel, "刷新结果").props.onClick();
+    assert.match(text(render()), /已送达/);
     store.mode = "remote";
     const message = { id: "3", channel_id: "2", guild_id: "4", content: "fixture", author: { id: "5", username: "sender" } };
     const receive = async (authorId = "5") => {
