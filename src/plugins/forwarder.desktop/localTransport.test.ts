@@ -108,6 +108,8 @@ async function checkPluginModeLifecycle() {
     });
     const plugin = output.exports.default;
     assert.equal(definition.mode.default, "local", "New installations default to Local");
+    assert.equal(definition.serverUrl.default, "https://forwarder.yufeng.run/forward", "Remote defaults to the legacy CF receiver");
+    assert.equal(definition.fallbackUrl.default, "", "Remote must not fall back to an incompatible Local receiver");
     assert.equal("localRuntimeDirectory" in definition, false, "The queue directory is no longer a visible setting");
     const fields = (tree: any): string[] => Array.isArray(tree) ? tree.flatMap(fields)
         : tree && typeof tree === "object" ? [tree.props?.id, ...fields(tree.props?.children)].filter(Boolean) : [];

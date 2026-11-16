@@ -1,5 +1,19 @@
 # Local 分支验证记录
 
+## 2026-11-16：Forwarder 复审问题 1/3/5
+
+对应范围和后续规划见 [复审记录](signal-hub-forwarder-review-2026-11-16.md)，生产实际收发另见 [生产核对记录](signal-hub-production-2026-11-16.md)。下方更早记录属于历史批次，不代表当前生产状态。
+
+- 故障注入先观察到旧行为失败，再修复：首次落盘失败、无恢复状态、无隔离重交和 Remote 默认协议错配；另外复现同名隔离覆盖，修复后原始证据保留。
+- `pnpm exec tsx src/plugins/forwarder.desktop/logic.test.ts`、`pnpm exec tsx src/plugins/forwarder.desktop/native.test.ts` 通过。
+- `pnpm exec tsx --test src/plugins/forwarder.desktop/localTransport.test.ts src/plugins/forwarder.desktop/localRetention.test.ts src/plugins/forwarder.desktop/localRecovery.test.ts`：12 项结果通过，包括 8 个恢复场景、3 个清理场景和 1 个整文件 transport/legacy/lifecycle 断言集合，不把它们全部表述为独立端到端场景。
+- `pnpm --dir signal-hub check`、`pnpm --dir signal-hub test`：86 项服务测试通过。生产服务未重启，测试使用临时数据库和 mock，不发送生产消息。
+- `pnpm test:ts`、`pnpm build --dev`、`pnpm fmt:check`、`git diff --check` 通过。新增 `localRecovery.test.ts` 的正式定向 lint 通过。
+- 完整 `pnpm lint` 仍失败：363 项既有 `path-alias/no-relative` 和 1 项既有 installer 文件头错误。修改文件的定向 lint 仅报告 5 项原有相对导入；其余规则没有新诊断。没有把带忽略参数但仍失败的命令记为通过，也没有为清理既有诊断扩大修改范围。
+- 重新 `git fetch origin` 后，`HEAD...origin/main` 为本地领先 45、上游待合并 0；上游最新提交为 `d07030c0`。本轮无需合并上游。
+- 本轮不更改 Channel-logger、Transcribe 或其注册，不清空数据库，不释放 uncertain，不执行 inject。修改 Native 后需由用户完整退出再打开 Discord。
+- 根 `pnpm-lock.yaml` 保留用户原有修改，SHA-256 为 `79ffe60a1a390df61582a03e5496b139bd4f11734291e25e8c456107a6e1e6ca`，不纳入提交。
+
 日期：2026-11-16，Asia/Shanghai。
 
 ## 可选入口鉴权（2026-11-16）

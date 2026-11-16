@@ -25,6 +25,7 @@ export async function configureLocal(_: IpcMainInvokeEvent, options: Omit<LocalO
 }
 export function enqueueLocal(_: IpcMainInvokeEvent, event: CaptureEnvelope) { return localTransport.enqueue(event); }
 export function localStatus(_: IpcMainInvokeEvent) { return localTransport.status(); }
+export function retryLocalQuarantine(_: IpcMainInvokeEvent) { return localTransport.retryQuarantined(); }
 export function stopLocal(_: IpcMainInvokeEvent) {
     localRequestGeneration++;
     return localTransport.stop();

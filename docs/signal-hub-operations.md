@@ -1,6 +1,8 @@
 # Signal-hub 本地服务运行说明
 
-开发分支：`local`。`iondex/local` 是远端 `iondex` 上 `local` 分支的引用，本地及 GitHub 分支名称均为 `local`。文本链路使用独立 Node 服务，CF 保留配置界面。当前实机测试使用测试模式，仅向 `futu-news` 对应目标投递。
+开发分支：`local`。`iondex/local` 是远端 `iondex` 上 `local` 分支的引用，本地及 GitHub 分支名称均为 `local`。文本链路使用独立 Node 服务，CF 保留配置界面。测试模式已在后续生产切换中关闭，服务按全部启用 route 投递；实际状态以运行服务和生产核对记录为准。
+
+本轮复审和后续规划见 [2026-11-16 复审](signal-hub-forwarder-review-2026-11-16.md)。Channel-logger 不在后续维护范围。
 
 过渡期的 CF 兼容要求约束插件 `remote` 模式：继续使用 legacy payload 与旧版 CF Worker 通信。`local` 使用独立的 v2 采集协议，不模拟旧 Worker，也不自动向 CF 消息入口回退。参考新 CF 架构不改变这个兼容边界。
 
@@ -330,7 +332,17 @@ pnpm logger -- --dir /absolute/path/Vencord/signal-hub/var/channel-logger
 
 如需 Bot 历史补采，设置 `botHistoryEnabled: true` 和 `recoveryAccountId`。仅对显式来源频道读取，按固定时间上界向前分页，完成区间后推进 checkpoint，并保留 10 分钟重叠；不把实时最大 snowflake 当连续读取证明。Logger 和 Bot 补采独立调度、独立记录失败，logger 缺失或损坏不会阻断 Bot 补采。Bot 没有来源读取权限时提示覆盖降级，不能用目标发送权限推断来源读取权限。没有配置独立来源时会提示覆盖降级，不扩展插件范围或读取 Discord 用户 token。
 
-当前人工工具只提供状态、暂停/恢复和全库备份；还没有提供一键释放 `safety_pending` / `uncertain`、跨主机 ACK 自动清理、完整附件下载缓存或 target profile 外观重建。这些记录不能通过删除库来“修复”；保留原始状态，由后续有审计记录的对账工具处理。
+当前人工工具提供状态、暂停/恢复、全库备份及下面的采集机隔离重交；还没有提供一键释放服务端 `safety_pending` / `uncertain`、跨主机 ACK 自动清理或完整附件下载缓存。这些记录不能通过删除库来“修复”；保留原始状态，由后续有审计记录的对账工具处理。
+
+## 采集机落盘失败与隔离恢复（2026-11-16）
+
+Local 标签的“本机持久队列”除 pending/acked/quarantine 外，会单独显示“尚未落盘”和缓冲区满拒绝次数。未落盘消息最多在当前 Native 进程保留 256 条或 16 MiB；自动重试沿用原 eventId 和 body，先成功落盘再交给 Hub。磁盘/权限恢复后会输出一次英文恢复日志，每批 25 条让出事件循环。已持久化消息仍须校验精确 durable ACK。
+
+出现未落盘错误时，先恢复采集机磁盘空间、目录和访问权限，暂勿退出 Discord 或变更队列目录。进程内缓冲不具备断电/崩溃保证，超额拒绝的记录也没有持久化保证。仅停止/重配置 transport 不会主动清空缓冲；真正退出 Discord 会失去未落盘部分。初始化连 client-id 都不能保存时仍无法启用采集，不能靠本补丁兜底所有磁盘故障。
+
+隔离原因写在 `spool/forwarder/quarantine-reasons`，原始文件继续放在 `quarantine`。HTTP 400/413/422 在修复接收地址、协议版本或请求大小限制后，可以在 Local 设置中主动点击“重交可恢复记录”。工具检查原 envelope、body hash、eventId 文件名及 pending/acked 冲突，只移回原待交接队列。原因记录暂时保留用于检查，console 不记录正文或凭据。
+
+HTTP 409、无原因元数据的历史隔离、损坏/被改写文件及同名 pending/acked 全部保留检查。重复隔离不会覆盖旧证据。这是采集交接恢复，不会释放 Hub 的 uncertain，也不会重放测试模式过滤和时间截止之前的历史投递。服务端仍按现有入库去重、时间边界、路由和防循环条件决定是否投递。
 
 ## 验证
 

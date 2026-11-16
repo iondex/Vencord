@@ -40,7 +40,7 @@
         "test": "pnpm test:ts && pnpm buildStandalone && pnpm buildWebStandalone && pnpm lint && pnpm fmt:check && pnpm generatePluginJson",
         "test:ts": "tsc --noEmit",
         "test:transcribe": "tsx --test src/plugins/transcribe.desktop/*.test.ts",
-        "test:signal-hub": "tsx src/plugins/forwarder.desktop/logic.test.ts && tsx src/plugins/forwarder.desktop/native.test.ts && tsx src/plugins/forwarder.desktop/localTransport.test.ts && tsx --test src/plugins/forwarder.desktop/localRetention.test.ts && tsx src/plugins/channel-logger.desktop/logic.test.ts && tsx scripts/channel-logger/cli.test.ts && tsx scripts/channel-logger/storage.test.ts && tsx scripts/channel-logger/server.test.ts && pnpm --dir signal-hub check && pnpm --dir signal-hub test",
+        "test:signal-hub": "tsx src/plugins/forwarder.desktop/logic.test.ts && tsx src/plugins/forwarder.desktop/native.test.ts && tsx src/plugins/forwarder.desktop/localTransport.test.ts && tsx --test src/plugins/forwarder.desktop/localRetention.test.ts src/plugins/forwarder.desktop/localRecovery.test.ts && tsx src/plugins/channel-logger.desktop/logic.test.ts && tsx scripts/channel-logger/cli.test.ts && tsx scripts/channel-logger/storage.test.ts && tsx scripts/channel-logger/server.test.ts && pnpm --dir signal-hub check && pnpm --dir signal-hub test",
         "bump": "./scripts/bump.sh"
     },
     "dependencies": {

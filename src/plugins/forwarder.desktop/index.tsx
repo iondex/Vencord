@@ -25,8 +25,8 @@ import type { LocalRouteTest, LocalServiceStatus } from "../../../signal-hub/con
 import { jsonSafe } from "../../../signal-hub/contracts/ingest";
 import { createForwarderStats, createHealthUrl, getForwardSkipReason, localSkipReason, normalizeLegacyMessage } from "./logic";
 
-const DEFAULT_SERVER_URL = "http://127.0.0.1:49321/forward";
-const DEFAULT_FALLBACK_URL = "https://forwarder.yufeng.run/forward";
+const DEFAULT_SERVER_URL = "https://forwarder.yufeng.run/forward";
+const DEFAULT_FALLBACK_URL = "";
 const DEFAULT_DINGTALK_WEBHOOK_URL = "";
 
 const logger = new Logger("forwarder");
@@ -394,6 +394,8 @@ function LocalTransportSettings() {
     const [status, setStatus] = useState<Awaited<ReturnType<typeof Native.localStatus>> | null>(null);
     const [service, setService] = useState<LocalServiceStatus | null>(null);
     const [changingMode, setChangingMode] = useState(false);
+    const [recovering, setRecovering] = useState(false);
+    const [recoveryMessage, setRecoveryMessage] = useState("");
     const [health, setHealth] = useState<HealthCheckState>({ status: "idle", message: "尚未检查服务状态。" });
     const [routeId, setRouteId] = useState("");
     const [test, setTest] = useState<LocalRouteTest | null>(null);
@@ -415,6 +417,7 @@ function LocalTransportSettings() {
         setTestMessage("");
         setTesting(false);
         setChangingMode(false);
+        setRecoveryMessage("");
         setHealth({ status: "idle", message: "连接配置已就绪，请检查服务状态。" });
     }, [localServerUrl, localPairingToken, excludedServerIds]);
 
@@ -569,6 +572,23 @@ function LocalTransportSettings() {
             {status && <>
                 <Paragraph><strong>本机持久队列</strong></Paragraph>
                 <Paragraph>本机队列：{status.active ? "运行中" : "未运行"} · 待交接 {status.pending} · 已交接 {status.acked} · 隔离 {status.quarantined}</Paragraph>
+                {Boolean(status.uncommitted || status.rejectedCaptures || status.persistenceError || status.queueError) && <Paragraph style={{ color: "var(--text-danger)" }}>
+                    尚未落盘 {status.uncommitted ?? 0} 条 · 缓冲区满拒绝 {status.rejectedCaptures ?? 0} 次。{status.persistenceError ?? status.queueError}
+                </Paragraph>}
+                {Boolean(status.quarantined) && <>
+                    <Paragraph>隔离原因：{status.quarantineReasons?.map(item => `${item.reason} ${item.total}`).join(" · ") || "历史记录，原因未知"}</Paragraph>
+                    <Button variant="secondary" disabled={!status.active || !status.retryableQuarantined || recovering} onClick={async () => {
+                        setRecovering(true);
+                        try {
+                            const result = await Native.retryLocalQuarantine();
+                            setRecoveryMessage(`已重新排队 ${result.requeued} 条，保留检查 ${result.held} 条。`);
+                            setStatus(await Native.localStatus());
+                        } catch { setRecoveryMessage("重交未完成，请检查本机队列与磁盘状态。"); }
+                        finally { setRecovering(false); }
+                    }}>{recovering ? "正在重交……" : `重交可恢复记录（${status.retryableQuarantined ?? 0}）`}</Button>
+                    <Paragraph>修复接收地址、版本或请求大小限制后再重交；冲突和损坏记录保留检查。</Paragraph>
+                </>}
+                {recoveryMessage && <Paragraph>{recoveryMessage}</Paragraph>}
                 <Paragraph>最近交接：{status.lastAcknowledgedAt ? new Date(status.lastAcknowledgedAt).toLocaleString() : "暂无"}{status.oldestPendingAt ? ` · 最早等待 ${Math.max(0, Math.floor((Date.now() - status.oldestPendingAt) / 60000))} 分钟` : ""}</Paragraph>
                 <Paragraph>每日 20:00（上海时间）清理已交接副本，未交接和隔离消息保留。</Paragraph>
                 {status.lastCleanupAt && <Paragraph>上次清理：{new Date(status.lastCleanupAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })} · {status.lastCleanupCount} 条 · 释放 {((status.lastCleanupBytes ?? 0) / 1048576).toFixed(2)} MB</Paragraph>}
@@ -586,7 +606,8 @@ function RemoteTransportSettings() {
         status: "idle",
         message: "尚未检查服务状态。"
     });
-    const fallbackUrl = settings.use(["fallbackUrl"]).fallbackUrl.trim();
+    const remoteSettings = settings.use(["serverUrl", "fallbackUrl", "localServerUrl"]);
+    const fallbackUrl = remoteSettings.fallbackUrl.trim();
     const [fallbackHealth, setFallbackHealth] = useState<HealthCheckState>({
         status: fallbackUrl ? "idle" : "error",
         message: fallbackUrl ? "尚未检查服务状态。" : "未配置"
@@ -640,6 +661,7 @@ function RemoteTransportSettings() {
 
     return (
         <Flex className="vc-forwarder-settings" flexDirection="column" gap="24px">
+            {remoteSettings.serverUrl.trim() === remoteSettings.localServerUrl.trim() && <Paragraph style={{ color: "var(--text-warning)" }}>主地址与 Local 接口相同，请改为旧版 CF Worker 接口。</Paragraph>}
             <Flex gap="8px" flexWrap="wrap">
                 <Button onClick={() => void handlePrimaryHealthCheck()} disabled={primaryHealth.status === "checking"}>
                     {primaryHealth.status === "checking" ? "正在检查主接口……" : "检查主接口"}

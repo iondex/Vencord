@@ -134,7 +134,7 @@
                 "scripts/transcribe/**",
                 "scripts/build/pluginProfile.mjs",
                 "src/plugins/forwarder.desktop/localTransport.ts",
-                "src/plugins/forwarder.desktop/localTransport.test.ts"
+                "src/plugins/forwarder.desktop/local*.test.ts"
             ],
             "rules": {
                 "simple-header/header": "off"

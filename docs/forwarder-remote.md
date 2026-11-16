@@ -2,7 +2,7 @@
 
 Remote 保留 Discord 通知资格筛选与 legacy `source / notification / metadata / message` 契约。它不会像 Local 一样采集所有符合基本来源边界的 `MESSAGE_CREATE`。
 
-配置字段：`serverUrl` 是主接收接口，`fallbackUrl` 是主接口失败后的备用；当前 CF 入口为 `https://forwarder.yufeng.run/forward`。旧用户的接收地址和启用状态继续保留。新增 Local 的地址、配对和运行目录使用独立字段，切换 Local 后不会自动执行 remote fallback。
+配置字段：`serverUrl` 是主接收接口，默认直接使用旧 CF 入口 `https://forwarder.yufeng.run/forward`；`fallbackUrl` 是主接口失败后的备用，默认留空。旧用户的接收地址和启用状态继续保留，不覆盖已保存的自定义地址。Remote 若误设为与 Local 相同的接口会显示提醒，请手动改回旧 CF 接收地址。Local 使用独立的地址和可选连接令牌，本机队列目录由插件自动确定；切换 Local 后不会自动执行 remote fallback。
 
 Remote 对每个端点最多尝试五次，间隔 1 / 2 / 4 / 5 秒。网络错误、超时、408、429 和 5xx 可以重试；400、401、403、404、422 等永久性请求错误只尝试一次，然后按原有 fallback 配置处理。健康检查独立使用目标 `/healthz`。
 
