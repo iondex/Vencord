@@ -117,7 +117,33 @@ test("diagnostic delivery retains retry audit and verifies actual target safety"
     }) as typeof fetch);
     await unsafe.send(store.claim("deliver"));
     assert.equal(posted, false);
-    assert.equal(localRouteTest(store, unsafeId)?.error, "target_safety_not_established");
+    assert.equal(localRouteTest(store, unsafeId)?.error, "target_source_overlap");
+});
+
+test("preflight failures retain actionable safe codes and never send without verified credentials", async context => {
+    const cases = [
+        { token: "", reason: "missing_discord_bot_token" },
+        { token: "test", reason: "bot_identity_unavailable", status: 401 },
+        { token: "test", reason: "target_channel_unresolved", status: 403 },
+        { token: "test", reason: "target_safety_not_established", networkError: true },
+    ];
+    for (const scenario of cases) {
+        const store = fixture(context);
+        const requestId = randomUUID();
+        createLocalRouteTest(store, requestId, "first", []);
+        let calls = 0;
+        const sender = createDiscordSender(store, { botToken: scenario.token }, [], (async (url, init) => {
+            calls++;
+            assert.notEqual(init?.method, "POST");
+            if (scenario.networkError) throw new Error("connection failed with sensitive credential in URL");
+            if (String(url).endsWith("/users/@me")) return Response.json({ id: "99", bot: true }, { status: scenario.status === 401 ? 401 : 200 });
+            return Response.json({}, { status: scenario.status });
+        }) as typeof fetch);
+        await sender.send(store.claim("deliver"));
+        assert.equal(localRouteTest(store, requestId)?.error, scenario.reason);
+        assert.equal((store.db.prepare("SELECT error FROM delivery_attempts").get() as any).error, scenario.reason);
+        if (!scenario.token) assert.equal(calls, 0);
+    }
 });
 
 test("public captures cannot request the trusted diagnostic state", context => {

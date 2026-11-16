@@ -474,11 +474,11 @@ function LocalTransportSettings() {
             <Flex gap="8px">
                 <Button onClick={check} disabled={health.status === "checking"}>{health.status === "checking" ? "正在检查……" : "检查本地 API"}</Button>
             </Flex>
-            <HealthLine label="Signal-hub" health={health} />
+            <HealthLine label="Signal-hub（上次检查）" health={health} />
             {service && <>
-                {service.paused && <Paragraph>仅采集归档。恢复投递：POST /api/resume。</Paragraph>}
+                {service.paused && <Paragraph>仅采集归档。POST /api/resume 后重新检查。</Paragraph>}
                 <Paragraph>可用路由 {routes.length} · 配置同步 {service.configSyncedAt ? new Date(Number(service.configSyncedAt)).toLocaleString() : "暂无"}</Paragraph>
-                <Paragraph>服务任务：{service.jobs.map(job => `${stateLabels[job.state] ?? "其他"} ${job.total}`).join(" · ") || "0"}</Paragraph>
+                <Paragraph>服务任务（含分段）：{service.jobs.map(job => `${stateLabels[job.state] ?? "其他"} ${job.total}`).join(" · ") || "0"}</Paragraph>
                 <Select
                     options={routes.map(route => ({ label: `${route.name || route.routeId} → ${route.targetChannelId}`, value: route.routeId }))}
                     select={(value: string) => { setRouteId(value); }}

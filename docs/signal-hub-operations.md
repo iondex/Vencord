@@ -227,6 +227,25 @@ SIGNAL_HUB_LOG_LEVEL=debug pnpm hub
 
 插件设置页显示本机持久化队列的待交接、已交接和隔离数量；暂存或连续失败非零时再显示异常摘要。最早积压时间、最近 ACK 时间及实际目录仍可通过 Native `localStatus` 获取。LAN 模式应同时检查采集机器的这份状态与服务端 `/api/status`。收到错误 ACK 时原记录继续留在本机；400/409/413/422 保留到本机隔离区，服务端按安全原因记录隔离事件，不能静默当作成功。数据库中的 raw 是敏感审计数据，需要按照使用者自己的保留策略管理。
 
+### 排队数量、测试按钮及投递预检
+
+“服务任务（含分段）”按任务状态计数，并非原始消息数；长消息分段和 Signal 工作会增加任务数。“本机队列已交接”表示服务已保存，与目标成功发送是两个阶段。暂停期间仍会规划任务，所以排队数量可以增长。设置页的服务状态来自上次点击“检查本地 API”的结果，不会自动跟随后续的暂停、恢复或服务停止更新；修改状态后需重新检查。
+
+“测试转发”要求已成功检查服务、选择可用路由且投递未暂停；同一路由已有未完成测试时也会禁用，使用“刷新结果”查看现有测试。`POST /api/resume` 恢复的是全部到期工作，包含积压消息，不能用它只放行单条测试；停止服务后应先确认凭据、路由及积压，再安排重新启动。
+
+`target_safety_not_established` 表示发送前未能验证发送身份或目标安全性，不等于 Discord 拒绝了消息正文。新代码保留受控的具体错误码，不记录外部异常中的 URL、请求头或凭据：
+
+| 错误码 | 检查项 |
+| --- | --- |
+| `missing_discord_bot_token` | 在服务 `secrets.json` 填写 `botToken`，或通过 `DISCORD_BOT_TOKEN` 注入；插件的连接令牌不能代替 Bot token |
+| `bot_identity_unavailable` / `discord_identity_not_bot` | 验证凭据有效且属于 Bot 账号 |
+| `bot_token_required_to_verify_channel_safety` | Webhook 投递同样需要 Bot token 核对目标所属服务器和父频道 |
+| `target_channel_unresolved` / `target_channel_invalid` | Bot 能否访问目标频道，目标是否有效 |
+| `target_source_overlap` | 目标与监听来源发生重叠，检查路由并保留防循环校验 |
+| `target_safety_not_established` | 其他未确认的预检失败，包括网络故障，保留任务等待重试 |
+
+2026-11-16 对用户报告任务的只读检查发现：当时本地 `botToken` 为空，也未配置 Webhook；335 次尝试均停在预检阶段，未进入实际发送。历史记录保留原来的通用错误码，新尝试会记录具体原因。
+
 ### X / Twitter 链接未转发的排查
 
 先按原消息的 `messageKey` 查询 `/api/deliveries?messageKey=discord:<serverId>:<channelId>:<messageId>`，确认是否归档、是否匹配 route、是否已有任务及发送尝试。`capture_committed` 或 HTTP 202 只说明保存成功，不能证明进入投递。`message_planned` 中的 `no_matching_route` 表示未生成投递任务；此时应核对 CF 配置的来源，而不是重试 Discord 发送。

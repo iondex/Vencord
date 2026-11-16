@@ -83,10 +83,15 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
             if (targetOverlapsSource(context.currentConfig.snapshot, target.channel)
                 || [job.target, target.channel.parent_id].includes(context.event.channelId)
                 || (context.event.parentChannelId && job.target === context.event.parentChannelId)) throw new Error("target_source_overlap");
-        } catch {
-            finishAttempt("preflight_failed", 0, "target_safety_not_established");
-            store.retryDelivery(job.id, "target_safety_not_established");
-            store.alert("discord_safety", "Discord target identity or route safety could not be confirmed; affected sends are paused");
+        } catch (error) {
+            const code = error instanceof Error && [
+                "invalid_webhook_url", "webhook_identity_unavailable", "webhook_channel_mismatch", "missing_discord_bot_token",
+                "bot_identity_unavailable", "discord_identity_not_bot", "bot_token_required_to_verify_channel_safety",
+                "target_channel_unresolved", "target_channel_invalid", "target_source_overlap",
+            ].includes(error.message) ? error.message : "target_safety_not_established";
+            finishAttempt("preflight_failed", 0, code);
+            store.retryDelivery(job.id, code);
+            store.alert("discord_safety", `Discord target identity or route safety could not be confirmed (${code}); affected sends are paused`);
             return;
         }
         const revalidated = executable(store, job, excludedServerIds);
