@@ -37,6 +37,16 @@ pnpm hub
 
 原有环境变量覆盖仍保留，供临时运维使用；日常配置以 JSON 为准。自定义运行目录时，配置、启动、status、backup 和 watchdog 都应使用相同的 `SIGNAL_HUB_VAR`。
 
+服务和独立 watchdog 显式读取 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`；同名小写变量优先，大写为后备。HTTPS 未单独配置代理时沿用 HTTP 代理，仅支持 HTTP/HTTPS 代理地址，不读取 `ALL_PROXY`。`localhost`、`127.0.0.1` 和 `::1` 始终直连，其余绕过地址在 `NO_PROXY` 中以逗号分隔。连接内网服务时，将其地址加入 `NO_PROXY`。代理生效时启动日志显示 `proxy enabled`，不会输出代理地址或凭据。
+
+例如已在本机 7890 端口运行 HTTP 代理，可临时执行：
+
+```sh
+HTTPS_PROXY=http://127.0.0.1:7890 pnpm hub
+```
+
+已导出代理变量时直接执行 `pnpm hub` 即可。修改代理环境变量后重启进程。Node 22.13 的原生 `fetch` 不会自行采用这些代理变量，因此本服务通过 Undici 显式设置网络代理；Discord、CF 配置同步、模型和钉钉请求均遵循相同配置，TLS 证书校验保持开启。
+
 依赖安装和初始化也可分别运行 `pnpm --dir signal-hub install --frozen-lockfile`、`pnpm --dir signal-hub run init`。
 
 初始化产生：
@@ -242,9 +252,15 @@ SIGNAL_HUB_LOG_LEVEL=debug pnpm hub
 | `bot_token_required_to_verify_channel_safety` | Webhook 投递同样需要 Bot token 核对目标所属服务器和父频道 |
 | `target_channel_unresolved` / `target_channel_invalid` | Bot 能否访问目标频道，目标是否有效 |
 | `target_source_overlap` | 目标与监听来源发生重叠，检查路由并保留防循环校验 |
-| `target_safety_not_established` | 其他未确认的预检失败，包括网络故障，保留任务等待重试 |
+| `discord_request_timeout` | 检查到 Discord 的连接和代理是否可用，请求尚停在预检阶段 |
+| `discord_dns_failed` | 检查 DNS、代理及 `NO_PROXY`，确认实际使用的网络路径 |
+| `discord_connection_failed` | 连接被拒绝、重置或网络不可达；检查代理进程、地址和端口 |
+| `discord_tls_failed` | 检查证书、系统时间和代理证书链，不应禁用 TLS 校验 |
+| `target_safety_not_established` | 其他未确认的预检失败，保留任务等待重试；旧版本网络故障也使用此码 |
 
 2026-11-16 对用户报告任务的只读检查发现：当时本地 `botToken` 为空，也未配置 Webhook；335 次尝试均停在预检阶段，未进入实际发送。历史记录保留原来的通用错误码，新尝试会记录具体原因。
+
+随后已从旧服务配置迁移 Bot token 到本地 `secrets.json`。再次复现发现 Node 直连 Discord 超时，但使用现有 HTTP 代理后，Bot 身份和目标频道查询均返回 HTTP 200。代理支持修复了此网络路径；该只读检查未实际发送消息，也不代表已验证发送权限。预检仍会检查目标与来源重叠，任何预检失败均保留任务和尝试记录；具体预检错误不会再使健康检查误报恢复。发送请求发出后的超时仍进入不确定状态并等待对账，不会按预检失败盲目重发。
 
 ### X / Twitter 链接未转发的排查
 

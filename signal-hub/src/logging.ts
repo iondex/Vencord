@@ -33,6 +33,7 @@ function consoleMessage(event: string, fields: Record<string, unknown>) {
     };
     const details: string[] = [];
     if (fields.host !== undefined) details.push(`${fields.host}:${fields.port}`);
+    if (fields.proxy) details.push("proxy enabled");
     if (fields.routeName || fields.routeId) details.push(`route ${fields.routeName || fields.routeId}`);
     if (fields.target) details.push(`→ ${fields.target}`);
     if (fields.state && event !== "delivery_sent") details.push(states[String(fields.state)] ?? String(fields.state));

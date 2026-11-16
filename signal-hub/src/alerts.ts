@@ -15,7 +15,9 @@ export function refreshHealthAlerts(store: Store, now = Date.now()) {
     else store.resolveAlert("delivery_attention");
     const outstanding = store.db.prepare(`SELECT max(state='uncertain') AS uncertain,
         max(state='retry_wait' OR recovery_cycles>0) AS exhausted,
-        max(error='target_safety_not_established') AS safety,
+        max(error='target_safety_not_established' OR EXISTS (
+            SELECT 1 FROM delivery_attempts WHERE job_id=jobs.id AND outcome='preflight_failed' AND error=jobs.error
+        )) AS safety,
         max(error GLOB 'discord_http_*' AND error!='discord_http_429') AS rejected,
         max(error='signal_extraction_failed') AS extraction FROM jobs
         WHERE state IN ('pending','leased','sending','retry_wait','uncertain','held','dead','review')`).get() as any;

@@ -1,5 +1,6 @@
 import { digest } from "./config.js";
 import type { HubLog } from "./logging.js";
+import { discordNetworkFailure } from "./network.js";
 import { executable } from "./queue.js";
 import { targetOverlapsSource } from "./routing.js";
 import { Store } from "./storage.js";
@@ -88,7 +89,7 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
                 "invalid_webhook_url", "webhook_identity_unavailable", "webhook_channel_mismatch", "missing_discord_bot_token",
                 "bot_identity_unavailable", "discord_identity_not_bot", "bot_token_required_to_verify_channel_safety",
                 "target_channel_unresolved", "target_channel_invalid", "target_source_overlap",
-            ].includes(error.message) ? error.message : "target_safety_not_established";
+            ].includes(error.message) ? error.message : discordNetworkFailure(error) ?? "target_safety_not_established";
             finishAttempt("preflight_failed", 0, code);
             store.retryDelivery(job.id, code);
             store.alert("discord_safety", `Discord target identity or route safety could not be confirmed (${code}); affected sends are paused`);

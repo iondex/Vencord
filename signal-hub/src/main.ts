@@ -8,6 +8,7 @@ import { createDiscordSender } from "./discord.js";
 import { writeDurable } from "./files.js";
 import { createHubHttp } from "./http.js";
 import { createLogger } from "./logging.js";
+import { configureNetwork } from "./network.js";
 import { planMessages } from "./queue.js";
 import { recoverBotHistory, recoverLogger } from "./reconciliation.js";
 import { getRuntimeDirectory, initializeRuntime, loadSecrets, loadSettings } from "./runtime.js";
@@ -47,6 +48,7 @@ if (command === "init") {
         store.close();
     } else if (configuration) {
         const { settings, secrets } = configuration;
+        const network = configureNetwork();
         const log = createLogger(join(runtimeDirectory, "logs"));
         const { excludedServerIds } = settings;
         let stopping = false;
@@ -135,7 +137,7 @@ if (command === "init") {
         }
         server.on("error", () => { log("listen_failed"); void shutdown(); process.exitCode = 1; });
         server.listen(settings.port, settings.host, () => {
-            log("hub_started", { host: settings.host, port: settings.port });
+            log("hub_started", { host: settings.host, port: settings.port, proxy: Boolean(network) });
             tick();
             void background("config_sync_failed", sync);
             intervals.push(setInterval(tick, 250));
@@ -169,6 +171,7 @@ if (command === "init") {
             for (const interval of intervals) clearInterval(interval);
             await new Promise<void>(resolveClose => { server.close(() => resolveClose()); server.closeIdleConnections(); });
             await Promise.allSettled([...tasks]);
+            await network?.close();
             log("hub_stopped");
             store.close();
             await log.close();

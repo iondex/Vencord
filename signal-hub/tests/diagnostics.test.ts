@@ -126,6 +126,10 @@ test("preflight failures retain actionable safe codes and never send without ver
         { token: "test", reason: "bot_identity_unavailable", status: 401 },
         { token: "test", reason: "target_channel_unresolved", status: 403 },
         { token: "test", reason: "target_safety_not_established", networkError: true },
+        { token: "test", reason: "discord_request_timeout", failure: new DOMException("sensitive URL", "TimeoutError") },
+        { token: "test", reason: "discord_dns_failed", failure: new TypeError("fetch failed", { cause: Object.assign(new Error("sensitive URL"), { code: "ENOTFOUND" }) }) },
+        { token: "test", reason: "discord_connection_failed", failure: new TypeError("fetch failed", { cause: Object.assign(new Error("sensitive URL"), { code: "ECONNRESET" }) }) },
+        { token: "test", reason: "discord_tls_failed", failure: new TypeError("fetch failed", { cause: Object.assign(new Error("sensitive URL"), { code: "CERT_HAS_EXPIRED" }) }) },
     ];
     for (const scenario of cases) {
         const store = fixture(context);
@@ -135,6 +139,7 @@ test("preflight failures retain actionable safe codes and never send without ver
         const sender = createDiscordSender(store, { botToken: scenario.token }, [], (async (url, init) => {
             calls++;
             assert.notEqual(init?.method, "POST");
+            if (scenario.failure) throw scenario.failure;
             if (scenario.networkError) throw new Error("connection failed with sensitive credential in URL");
             if (String(url).endsWith("/users/@me")) return Response.json({ id: "99", bot: true }, { status: scenario.status === 401 ? 401 : 200 });
             return Response.json({}, { status: scenario.status });

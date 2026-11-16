@@ -139,6 +139,33 @@ test("health alerts detect overdue ready jobs and only recover when all affected
     assert.ok((state.store.status().activeAlerts as any[]).some(row => row.code === "delivery_uncertain_recovered"));
 });
 
+test("specific preflight failures keep the safety alert active until affected deliveries recover", async context => {
+    const state = fixture(context);
+    const now = Date.now() + 1000;
+    state.store.setMetadata("config_hash", "fixture");
+    state.store.setMetadata("config_synced_at", String(now));
+    state.store.db.prepare("INSERT INTO messages(message_key,envelope,state,created_at) VALUES('source','{}','routed',?)").run(now);
+    const failures = ["missing_discord_bot_token", "discord_connection_failed", "discord_request_timeout", "discord_dns_failed", "discord_tls_failed"];
+    const jobs = failures.map((error, index) => {
+        const job = state.store.enqueue("source", "deliver", "route", `target${index}`, 0, {}, "fixture");
+        state.store.db.prepare("INSERT INTO delivery_attempts(job_id,started_at,outcome,error) VALUES(?,?,'preflight_failed',?)").run(job, now, error);
+        state.store.db.prepare("UPDATE jobs SET state='retry_wait',error=? WHERE id=?").run(error, job);
+        return job;
+    });
+    state.store.alert("discord_safety", "Discord preflight failed");
+    await flushAlerts(state.store, "https://alert.test", state.fetcher, now);
+    state.restart();
+    for (const job of jobs) {
+        refreshHealthAlerts(state.store, now + 30_000);
+        assert.ok((state.store.status().activeAlerts as any[]).some(row => row.code === "discord_safety"));
+        assert.equal((state.store.status().activeAlerts as any[]).some(row => row.code === "discord_safety_recovered"), false);
+        state.store.db.prepare("UPDATE jobs SET state='sent',error='' WHERE id=?").run(job);
+    }
+    refreshHealthAlerts(state.store, now + 60_000);
+    assert.equal((state.store.status().activeAlerts as any[]).some(row => row.code === "discord_safety"), false);
+    assert.ok((state.store.status().activeAlerts as any[]).some(row => row.code === "discord_safety_recovered"));
+});
+
 test("lease recovery creates the critical uncertain-outcome alert even if the send process crashed", context => {
     const state = fixture(context);
     state.store.db.prepare("INSERT INTO messages(message_key,envelope,state,created_at) VALUES('source','{}','routed',?)").run(Date.now());

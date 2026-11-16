@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { writeDurable } from "./files.js";
+import { configureNetwork } from "./network.js";
 import { getRuntimeDirectory, loadDingTalkWebhook } from "./runtime.js";
 
 export function createWatchdog(directory: string, webhook: string | undefined, fetcher: typeof fetch = fetch) {
@@ -56,6 +57,7 @@ export function createWatchdog(directory: string, webhook: string | undefined, f
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+    configureNetwork();
     const directory = getRuntimeDirectory();
     const webhook = loadDingTalkWebhook(directory);
     const check = createWatchdog(directory, webhook);
