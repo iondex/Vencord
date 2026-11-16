@@ -94,6 +94,7 @@ async function checkPluginModeLifecycle() {
     const bundle = await build({
         entryPoints: [join(__dirname, "index.tsx")], bundle: true, write: false,
         platform: "node", format: "cjs", external: ["@*"], jsx: "transform", logLevel: "silent",
+        loader: { ".css": "empty" },
     });
     const output = { exports: {} as { default: { start(): void; stop(): void; flux: { MESSAGE_CREATE(event: unknown): void; }; }; } };
     runInNewContext(bundle.outputFiles[0].text, {

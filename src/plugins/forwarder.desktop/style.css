@@ -1,0 +1,48 @@
+.vc-forwarder-settings {
+    padding: 8px 2px 16px;
+}
+
+.vc-forwarder-field {
+    padding: 4px 0;
+}
+
+.vc-forwarder-runtime {
+    padding-top: 24px;
+    border-top: 1px solid var(--background-modifier-accent);
+}
+
+.vc-forwarder-runtime p {
+    margin: 0;
+    line-height: 1.7;
+}
+
+.vc-forwarder-muted,
+.vc-forwarder-statistics dt {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.vc-forwarder-statistics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 24px 20px;
+    margin: 0;
+    padding: 20px 0;
+    border-top: 1px solid var(--background-modifier-accent);
+    border-bottom: 1px solid var(--background-modifier-accent);
+}
+
+.vc-forwarder-statistics dd {
+    margin: 8px 0 0;
+    color: var(--text-normal);
+    font-size: 20px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.vc-forwarder-route-test {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-top: 8px;
+}

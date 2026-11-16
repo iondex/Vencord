@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import "./style.css";
+
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import ErrorBoundary from "@components/ErrorBoundary";
@@ -376,6 +378,17 @@ function HealthLine({ label, health }: { label: string; health: HealthCheckState
     );
 }
 
+function dashboardAddress(address: string, port: number) {
+    try {
+        const url = new URL(address);
+        url.port = String(port);
+        url.pathname = "/";
+        url.search = "";
+        url.hash = "";
+        return url.toString();
+    } catch { return undefined; }
+}
+
 function LocalTransportSettings() {
     const { localServerUrl, localPairingToken, excludedServerIds } = settings.use(["localServerUrl", "localPairingToken", "excludedServerIds"]);
     const [status, setStatus] = useState<Awaited<ReturnType<typeof Native.localStatus>> | null>(null);
@@ -424,6 +437,28 @@ function LocalTransportSettings() {
             setHealth({ status: "error", message: "无法检查服务状态，请查看本地进程和网络。" });
         }
     };
+
+    useEffect(() => {
+        if (!service) return;
+        let disposed = false;
+        let refreshing = false;
+        const refresh = async () => {
+            if (refreshing) return;
+            refreshing = true;
+            try {
+                const [queue, result] = await Promise.all([Native.localStatus(), Native.checkLocalService(connection)]);
+                if (disposed || !currentConnection()) return;
+                setStatus(queue);
+                if (result.ok) {
+                    setService(result.data);
+                    setHealth({ status: "ok", message: result.data.paused ? "在线 · 投递已暂停" : "在线 · 投递运行中" });
+                } else setHealth({ status: "error", message: `${result.message}；统计保留上次结果。` });
+            } catch { if (!disposed && currentConnection()) setHealth({ status: "error", message: "状态刷新失败；统计保留上次结果。" }); }
+            finally { refreshing = false; }
+        };
+        const interval = setInterval(() => { void refresh(); }, 5000);
+        return () => { disposed = true; clearInterval(interval); };
+    }, [Boolean(service), localServerUrl, localPairingToken, excludedServerIds]);
 
     async function refreshTest() {
         if (!test) return;
@@ -484,20 +519,33 @@ function LocalTransportSettings() {
     };
 
     return (
-        <Flex flexDirection="column" gap="8px">
-            <Flex gap="8px">
+        <Flex className="vc-forwarder-runtime" flexDirection="column" gap="20px">
+            <Flex gap="12px" alignItems="center" flexWrap="wrap">
                 <Button onClick={check} disabled={health.status === "checking"}>{health.status === "checking" ? "正在检查……" : "检查本地 API"}</Button>
+                {service && <a href={dashboardAddress(connection.url, service.dashboardPort ?? 9900)} target="_blank" rel="noreferrer">打开状态页</a>}
+                <span className="vc-forwarder-muted">检查后每 5 秒刷新</span>
             </Flex>
             <HealthLine label="Signal-hub（上次检查）" health={health} />
             {service && <>
                 {service.paused && <Paragraph>仅采集归档。POST /api/resume 后重新检查。</Paragraph>}
-                {typeof service.testMode === "boolean" && <Flex gap="8px">
+                {typeof service.testMode === "boolean" && <Flex gap="16px" alignItems="center" flexWrap="wrap">
                     <Button variant="secondary" onClick={toggleTestMode} disabled={changingMode}>{service.testMode ? "关闭测试模式" : "开启测试模式"}</Button>
                     <Paragraph>测试模式：{service.testMode ? "开启，仅转发 futu-news" : "关闭"}</Paragraph>
                 </Flex>}
+                {service.statistics && <dl className="vc-forwarder-statistics">
+                    {[
+                        ["归档消息", service.statistics.messages.toLocaleString()],
+                        ["累计送达任务", service.statistics.delivered.toLocaleString()],
+                        ["近 1h 收 / 发", `${service.statistics.capturedLastHour} / ${service.statistics.deliveredLastHour}`],
+                        ["待完成投递", service.statistics.queued.toLocaleString()],
+                        ["24h 尝试成功率", service.statistics.successRate24h === null ? "暂无尝试" : `${(service.statistics.successRate24h * 100).toFixed(1)}%`],
+                        ["最后送达", service.statistics.lastDeliveredAt ? new Date(service.statistics.lastDeliveredAt).toLocaleTimeString() : "暂无"],
+                    ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+                </dl>}
                 <Paragraph>可用路由 {routes.length} · 配置同步 {service.configSyncedAt ? new Date(Number(service.configSyncedAt)).toLocaleString() : "暂无"}</Paragraph>
                 <Paragraph>服务任务（含分段）：{service.jobs.map(job => `${stateLabels[job.state] ?? "其他"} ${job.total}`).join(" · ") || "0"}</Paragraph>
-                <Select
+                <div className="vc-forwarder-route-test"><Paragraph><strong>转发测试</strong></Paragraph>
+                    <Select
                     options={routes.map(route => ({ label: `${route.name || route.routeId} → ${route.targetChannelId}`, value: route.routeId }))}
                     select={(value: string) => { setRouteId(value); }}
                     isSelected={value => value === routeId}
@@ -505,21 +553,27 @@ function LocalTransportSettings() {
                     placeholder="选择要测试的路由"
                     maxVisibleItems={6}
                     closeOnSelect={true}
-                />
+                    />
                 <Paragraph>向所选目标真实发送一条测试消息。</Paragraph>
-                <Flex gap="8px" flexWrap="wrap">
-                    <Button onClick={sendTest} disabled={!selectedRoute || service.paused || testing || Boolean(test && test.routeId === routeId && test.state !== "sent")}>
+                <Flex gap="12px" flexWrap="wrap">
+                    <Button onClick={sendTest} disabled={!selectedRoute || service.paused || health.status !== "ok" || testing || Boolean(test && test.routeId === routeId && test.state !== "sent")}>
                         {testing ? "正在提交……" : testRequest && !test ? "重试提交" : "测试转发"}
                     </Button>
                     {test && <Button variant="secondary" onClick={refreshTest}>刷新结果</Button>}
-                </Flex>
+                </Flex></div>
             </>}
             {testMessage && <Paragraph>{testMessage}</Paragraph>}
             {test && <>
                 <Paragraph title={test.requestId}>测试：{stateLabels[test.state] ?? "未知状态"} · 尝试 {test.attempts} 次{test.error ? ` · ${test.error}` : ""}</Paragraph>
             </>}
             {status && <>
+                <Paragraph><strong>本机持久队列</strong></Paragraph>
                 <Paragraph>本机队列：{status.active ? "运行中" : "未运行"} · 待交接 {status.pending} · 已交接 {status.acked} · 隔离 {status.quarantined}</Paragraph>
+                <Paragraph>最近交接：{status.lastAcknowledgedAt ? new Date(status.lastAcknowledgedAt).toLocaleString() : "暂无"}{status.oldestPendingAt ? ` · 最早等待 ${Math.max(0, Math.floor((Date.now() - status.oldestPendingAt) / 60000))} 分钟` : ""}</Paragraph>
+                <Paragraph>每日 20:00（上海时间）清理已交接副本，未交接和隔离消息保留。</Paragraph>
+                {status.lastCleanupAt && <Paragraph>上次清理：{new Date(status.lastCleanupAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })} · {status.lastCleanupCount} 条 · 释放 {((status.lastCleanupBytes ?? 0) / 1048576).toFixed(2)} MB</Paragraph>}
+                {status.nextCleanupAt && <Paragraph>下次清理：{new Date(status.nextCleanupAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })} · 累计清理 {status.totalCleaned ?? 0} 条</Paragraph>}
+                {status.cleanupError && <Paragraph>{status.cleanupError}</Paragraph>}
                 {(status.staged > 0 || status.consecutiveFailures > 0) && <Paragraph>暂存 {status.staged} · 连续失败 {status.consecutiveFailures}</Paragraph>}
                 {status.lastError && <Paragraph>{status.lastError}</Paragraph>}
             </>}
@@ -585,7 +639,7 @@ function RemoteTransportSettings() {
     }
 
     return (
-        <Flex flexDirection="column" gap="12px">
+        <Flex className="vc-forwarder-settings" flexDirection="column" gap="24px">
             <Flex gap="8px" flexWrap="wrap">
                 <Button onClick={() => void handlePrimaryHealthCheck()} disabled={primaryHealth.status === "checking"}>
                     {primaryHealth.status === "checking" ? "正在检查主接口……" : "检查主接口"}
@@ -626,7 +680,7 @@ function ForwarderSettings({ setValue, closePluginSettings }: PluginSettingCompo
             {fields.map(key => {
                 const setting = settings.def[key];
                 const Component = OptionComponentMap[setting.type];
-                return <Component
+                return <div className="vc-forwarder-field" key={key}><Component
                     key={key}
                     id={key}
                     setting={setting}
@@ -637,7 +691,7 @@ function ForwarderSettings({ setValue, closePluginSettings }: PluginSettingCompo
                         Object.assign(settings.store, { [key]: value });
                         if ("restartNeeded" in setting && setting.restartNeeded) setValue(mode);
                     }}
-                />;
+                /></div>;
             })}
             {mode === "local" ? <LocalTransportSettings /> : <RemoteTransportSettings />}
         </Flex>

@@ -38,6 +38,61 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
     let clientId = "";
     let lastAttemptAt: number | null = null;
     let lastAcknowledgedAt: number | null = null;
+    let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+    let cleaning: Promise<void> | undefined;
+    let scheduledCleanupAt: number | null = null;
+    let cleanupError: string | null = null;
+    let cleanupState = { lastCutoff: 0, lastRunAt: null as number | null, removed: 0, freedBytes: 0, totalRemoved: 0 };
+
+    function cleanupCutoff(now: number) {
+        const date = new Date(now);
+        date.setUTCHours(12, 0, 0, 0);
+        return date.getTime() > now ? date.getTime() - 86_400_000 : date.getTime();
+    }
+
+    function cleanup(now = Date.now()) {
+        if (cleaning) return cleaning;
+        const cutoff = cleanupCutoff(now);
+        if (!options || cleanupState.lastCutoff >= cutoff) return Promise.resolve();
+        cleaning = cleanupAcknowledged(now, cutoff).finally(() => { cleaning = undefined; });
+        return cleaning;
+    }
+
+    async function cleanupAcknowledged(now: number, cutoff: number) {
+        try {
+            let removed = 0;
+            let freedBytes = 0;
+            const directory = join(root(), "acked");
+            for (const entry of readdirSync(directory, { withFileTypes: true })) {
+                if (!entry.isFile() || !/^[a-f\d]{64}\.json$/.test(entry.name)) continue;
+                const path = join(directory, entry.name);
+                const { size } = statSync(path);
+                unlinkSync(path);
+                removed++;
+                freedBytes += size;
+                if (removed % 100 === 0) await new Promise<void>(resolveCleanup => setImmediate(resolveCleanup));
+            }
+            syncDirectory(directory);
+            const next = { lastCutoff: cutoff, lastRunAt: now, removed, freedBytes, totalRemoved: cleanupState.totalRemoved + removed };
+            atomicWrite(join(root(), "cleanup-state.json"), JSON.stringify(next));
+            syncDirectory(root());
+            cleanupState = next;
+            cleanupError = null;
+            console.info(`[forwarder] Daily cleanup completed: ${removed} acknowledged captures, ${freedBytes} bytes`);
+        } catch {
+            if (!cleanupError) console.warn("[forwarder] Daily cleanup failed; unacknowledged captures remain untouched");
+            cleanupError = "已交接副本清理失败，将自动重试。";
+        }
+    }
+
+    function scheduleCleanup() {
+        if (cleanupTimer) clearTimeout(cleanupTimer);
+        if (!active) return;
+        const delay = cleanupError ? 60_000 : Math.max(1000, cleanupCutoff(Date.now()) + 86_400_000 - Date.now());
+        scheduledCleanupAt = Date.now() + delay;
+        cleanupTimer = setTimeout(() => { void cleanup().finally(scheduleCleanup); }, delay);
+        cleanupTimer.unref();
+    }
 
     function root() {
         if (!options) throw new Error("Local transport is not configured");
@@ -119,9 +174,26 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
             if (!isAbsolute(input.runtimeDirectory) || (input.token !== "" && input.token.length < 24)) {
                 throw new Error("Use an absolute runtime directory; leave the pairing token empty or use at least 24 characters");
             }
-            if (sending) throw new Error("Wait for the current handoff before changing transport settings");
+            if (sending || cleaning) throw new Error("Wait for the current handoff and cleanup before changing transport settings");
             options = { ...input, runtimeDirectory: resolve(input.runtimeDirectory) };
             for (const name of ["pending", "acked", "quarantine"]) mkdirSync(join(root(), name), { recursive: true, mode: 0o700 });
+            const cleanupPath = join(root(), "cleanup-state.json");
+            cleanupError = null;
+            cleanupState = { lastCutoff: cleanupCutoff(Date.now()), lastRunAt: null, removed: 0, freedBytes: 0, totalRemoved: 0 };
+            try {
+                if (existsSync(cleanupPath)) {
+                    const saved = JSON.parse(readFileSync(cleanupPath, "utf8"));
+                    if (![saved.lastCutoff, saved.removed, saved.freedBytes, saved.totalRemoved].every(value => Number.isFinite(value) && value >= 0)
+                        || !(saved.lastRunAt === null || Number.isFinite(saved.lastRunAt))) throw new Error("Invalid cleanup state");
+                    cleanupState = saved;
+                } else {
+                    atomicWrite(cleanupPath, JSON.stringify(cleanupState));
+                    syncDirectory(root());
+                }
+            } catch {
+                cleanupError = "无法读取或保存清理计划，消息交接继续运行。";
+                console.warn("[forwarder] Cleanup state unavailable; message handoff remains active");
+            }
             const clientPath = join(root(), "client-id");
             clientId = existsSync(clientPath) ? readFileSync(clientPath, "utf8").trim() : "";
             if (!/^[\da-f-]{36}$/.test(clientId)) {
@@ -146,6 +218,7 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
             }
             active = true;
             generation++;
+            void cleanup().finally(scheduleCleanup);
             schedule(0);
             return { ok: true };
         },
@@ -173,6 +246,8 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
                 acked: count("acked"), quarantined: options ? readdirSync(join(root(), "quarantine")).length : 0,
                 oldestPendingAt, lastAttemptAt, lastAcknowledgedAt, consecutiveFailures: failures, lastError,
                 runtimeDirectory: options?.runtimeDirectory ?? null,
+                lastCleanupAt: cleanupState.lastRunAt, lastCleanupCount: cleanupState.removed, lastCleanupBytes: cleanupState.freedBytes,
+                totalCleaned: cleanupState.totalRemoved, nextCleanupAt: active ? scheduledCleanupAt : options ? cleanupState.lastCutoff + 86_400_000 : null, cleanupError,
             };
         },
         async stop() {
@@ -180,8 +255,12 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
             generation++;
             if (timer) clearTimeout(timer);
             timer = undefined;
-            await sending;
+            if (cleanupTimer) clearTimeout(cleanupTimer);
+            cleanupTimer = undefined;
+            scheduledCleanupAt = null;
+            await Promise.all([sending, cleaning]);
         },
         drain,
+        cleanup,
     };
 }

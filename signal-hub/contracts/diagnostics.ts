@@ -15,6 +15,21 @@ export interface LocalServiceStatus {
     configSyncedAt: string | null;
     routes: LocalRoute[];
     jobs: { state: string; total: number; }[];
+    statistics?: LocalServiceStatistics;
+    dashboardPort?: number;
+}
+
+export interface LocalServiceStatistics {
+    messages: number;
+    receipts: number;
+    delivered: number;
+    capturedLastHour: number;
+    deliveredLastHour: number;
+    queued: number;
+    oldestPendingAt: number | null;
+    lastCapturedAt: number | null;
+    lastDeliveredAt: number | null;
+    successRate24h: number | null;
 }
 
 export interface LocalRouteTest {
