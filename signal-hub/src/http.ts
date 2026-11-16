@@ -5,6 +5,7 @@ import { validateCapture } from "../contracts/ingest.js";
 import { Store } from "./storage.js";
 
 function authorized(request: IncomingMessage, token: string) {
+    if (!token) return true;
     const actual = Buffer.from(request.headers.authorization ?? "");
     const expected = Buffer.from(`Bearer ${token}`);
     return actual.length === expected.length && timingSafeEqual(actual, expected);

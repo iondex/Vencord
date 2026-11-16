@@ -20,15 +20,10 @@ test("runtime initialization validates addresses before writing and preserves ex
     assert.equal(settings.host, "::");
     assert.equal(settings.port, 49325);
     const secrets = loadSecrets(directory, {});
-    assert.match(secrets.pairingToken, /^[a-f0-9]{64}$/);
-    assert.match(secrets.adminToken, /^[a-f0-9]{64}$/);
-    assert.notEqual(secrets.pairingToken, secrets.adminToken);
+    assert.equal(secrets.pairingToken, "");
+    assert.equal(secrets.adminToken, "");
     for (const filename of ["settings.json", "secrets.json"]) assert.equal(statSync(join(directory, filename)).mode & 0o777, 0o600);
-    const otherDirectory = join(directory, "other");
-    initializeRuntime(otherDirectory, {});
-    const otherSecrets = loadSecrets(otherDirectory, {});
-    assert.notEqual(secrets.pairingToken, otherSecrets.pairingToken);
-    assert.notEqual(secrets.adminToken, otherSecrets.adminToken);
+    writeFileSync(join(directory, "secrets.json"), JSON.stringify({ ...secrets, pairingToken: "existing-pairing-token-for-test", adminToken: "existing-admin-token-for-test" }));
     const original = readFileSync(join(directory, "secrets.json"), "utf8");
     assert.throws(() => initializeRuntime(directory, {}), /preserve/);
     assert.equal(readFileSync(join(directory, "secrets.json"), "utf8"), original);
@@ -59,7 +54,18 @@ test("runtime settings and secret overrides are shared without rewriting private
     writeFileSync(settingsPath, JSON.stringify({ ...saved, excludedServerIds: [123] }));
     assert.throws(() => loadSettings(directory, {}));
     const savedSecrets = JSON.parse(originalSecrets);
-    writeFileSync(secretsPath, JSON.stringify({ ...savedSecrets, adminToken: savedSecrets.pairingToken }));
+    const token = "optional-pairing-token-for-test";
+    for (const tokens of [{ pairingToken: "", adminToken: "" }, { pairingToken: token, adminToken: "" }, { pairingToken: "", adminToken: token }, { pairingToken: token, adminToken: "optional-admin-token-for-test" }]) {
+        writeFileSync(secretsPath, JSON.stringify({ ...savedSecrets, ...tokens }));
+        const loaded = loadSecrets(directory, {});
+        assert.equal(loaded.pairingToken, tokens.pairingToken);
+        assert.equal(loaded.adminToken, tokens.adminToken);
+    }
+    for (const tokens of [{ pairingToken: "short", adminToken: "" }, { pairingToken: "", adminToken: "short" }]) {
+        writeFileSync(secretsPath, JSON.stringify({ ...savedSecrets, ...tokens }));
+        assert.throws(() => loadSecrets(directory, {}));
+    }
+    writeFileSync(secretsPath, JSON.stringify({ ...savedSecrets, pairingToken: token, adminToken: token }));
     assert.throws(() => loadSecrets(directory, {}), /distinct/);
     assert.equal(loadDingTalkWebhook(directory, {}), "", "Watchdog must not depend on valid main-service tokens");
     writeFileSync(secretsPath, "{");

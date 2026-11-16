@@ -79,7 +79,7 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
                 lastAttemptAt = Date.now();
                 const response = await fetcher(currentOptions.url, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentOptions.token}` },
+                    headers: { "Content-Type": "application/json", ...(currentOptions.token ? { Authorization: `Bearer ${currentOptions.token}` } : {}) },
                     body,
                     signal: AbortSignal.timeout(10_000),
                     redirect: "error",
@@ -116,8 +116,8 @@ export function createLocalTransport(fetcher: typeof fetch = fetch) {
     return {
         configure(input: LocalOptions) {
             validateServiceUrl(input.url);
-            if (!isAbsolute(input.runtimeDirectory) || input.token.length < 24) {
-                throw new Error("Use an absolute runtime directory and a pairing token of at least 24 characters");
+            if (!isAbsolute(input.runtimeDirectory) || (input.token !== "" && input.token.length < 24)) {
+                throw new Error("Use an absolute runtime directory; leave the pairing token empty or use at least 24 characters");
             }
             if (sending) throw new Error("Wait for the current handoff before changing transport settings");
             options = { ...input, runtimeDirectory: resolve(input.runtimeDirectory) };

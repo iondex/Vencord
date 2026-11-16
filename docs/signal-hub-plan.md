@@ -118,7 +118,7 @@ flowchart LR
 
 本地服务独立于 Discord Electron 进程。插件负责采集和可靠交接；独立服务负责配置、存储、路由、解析、限流、重试和运维。Discord 重载不应打断已接收的处理任务。
 
-local 执行路径不读取 CF routes、模型 key、Bot/webhook token 或钉钉凭据；只需要本地地址、运行目录和 pairing token。remote 原有设置独立保留。服务端完成持久化后的业务失败，不回流为插件重新执行业务的理由。
+local 执行路径不读取 CF routes、模型 key、Bot/webhook token 或钉钉凭据；只需要本地地址、运行目录和可选 pairing token。pairing token 默认留空，服务对应字段为空时无需鉴权。remote 原有设置独立保留。服务端完成持久化后的业务失败，不回流为插件重新执行业务的理由。
 
 ## 4. 最小侵入的双插件构建
 
@@ -380,7 +380,7 @@ signal-hub/
 - 本机 secret 从环境或 `var/secrets.json` 读取，文件权限 0600，secret 不进入 Git；运行日志、数据库、PID、下载临时文件、录音和转录均在 `var`。
 - 在独立嵌套 workspace 安装服务依赖，Vencord 根目录最多增加少量 `pnpm --dir signal-hub ...` 便捷脚本；本次不重建用户已有 root lockfile。
 - 不让 Vencord renderer import 服务入口或模型/SQLite 依赖，只引用无依赖 transport contract。
-- 服务默认绑定 loopback，可配置为内网监听地址；写入接口采用配对 token，token 不通过 CF 配置下发。插件通过 native HTTP 调用，避免 renderer 的 CORS/页面权限问题。内网部署时 native spool 放在 Discord 所在机器，业务数据库和配置缓存放在服务机器。
+- 服务默认绑定 loopback，可配置为内网监听地址；写入和管理接口分别保留可选的 pairing/admin token，默认均为空，空值表示对应接口无需 token，非空时校验。token 不通过 CF 配置下发。插件通过 native HTTP 调用，避免 renderer 的 CORS/页面权限问题。内网部署时 native spool 放在 Discord 所在机器，业务数据库和配置缓存放在服务机器。
 - 第一版继续保留更名后的 `channel-logger` 49322 服务；启动脚本通过现有 `--dir` 把其数据库和导出放在 `signal-hub/var/channel-logger`。不为统一端口重写现有 logger。
 - 开发使用 pnpm 脚本；当前 macOS 环境优先提供 launchd 示例，Linux 再给 systemd 示例。插件不私自启动任意 shell 命令。
 - 新库执行有版本号的 migration；旧库升级不能反复执行完整 schema 或删除数据。备份使用 SQLite backup API 或可靠的一致性备份流程，不能只复制活动 `.sqlite3` 而忽略 WAL。
@@ -589,7 +589,7 @@ server 健康状态分开显示 `ingestReady`、`configReady`、`deliveryReady`�
 | CF 配置读取凭据 | 现有只读接口所需认证；若接口无需认证，不虚构额外 token | 环境或本机 secret；只显示已配置/失效 |
 | Discord Bot token 或 webhook token | 优先从获授权且可读的 CF 配置/D1 取得，缺失时由用户补充；按目标类型用于投递，Bot 来源读取能力另行验证 | 保留最小所需数据，不批量输出表内容；能发目标不代表能补采来源 |
 | 模型 key | 旧 `OPENAI_API_KEY` / 新 `OPENAI_KEY` 统一映射 | 按 provider 保存，日志不显示值 |
-| 本地 pairing token | 初始化时生成，只供本机 native/service | 独立于 CF，不导出 Discord 用户会话 token |
+| 本地 pairing/admin token | 默认留空，按需配置后分别保护采集/管理入口 | 独立于 CF，不导出 Discord 用户会话 token |
 | DingTalk webhook | 使用用户已提供的地址 | 只写本机环境或 `var/secrets.json`；不进入规划、源码默认值或 Git |
 | 可选 ASR/备份凭据 | 相应阶段真正采用时才初始化 | 区分用途，不复用无关 token |
 

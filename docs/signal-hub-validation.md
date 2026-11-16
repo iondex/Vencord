@@ -1,8 +1,16 @@
 # Local 分支验证记录
 
-日期：2026-11-15，Asia/Shanghai。
+日期：2026-11-16，Asia/Shanghai。
 
-## JSON 初始化与插件设置
+## 可选入口鉴权（2026-11-16）
+
+- `pairingToken` / `adminToken` 保留且默认 `""`，对应接口在空值时无需 token；非空值仍须至少 24 字符，两个非空令牌不能相同，重复初始化保留已有设置。
+- 本机 `signal-hub/var/secrets.json` 中两个已生成的令牌按用户要求清空，其他设置保持不变；插件 `localPairingToken` 默认留空，不发送空 Authorization 头。
+- `pnpm test:signal-hub` 全部通过，服务端为 54/54；新增四种采集/管理鉴权组合，覆盖缺失、错误、正确和旧请求令牌，以及浏览器 Origin 限制。真实 CLI 启动、采集、离线缓存重启和备份均以空令牌验证。
+- 插件回归验证空 token 时正常持久化、重试和 durable ACK，切回非空 token 后携带正确头；Remote 兼容与现有 native/logger 回归通过。
+- `pnpm test:ts`、`pnpm build --dev`、`pnpm fmt:check`、`pnpm generatePluginJson`、shell 语法和 `git diff --check` 通过；改动文件的定向风格检查通过，完整 lint 的既有问题见下文。
+
+## JSON 初始化与插件设置（2026-11-15，令牌默认值已由上节更新）
 
 - 分支实际名称为 `local`；`iondex/local` 表示远端 `iondex` 的 `local` 跟踪引用。
 - 初始化只生成 `settings.json` 和 `secrets.json`，配对和管理令牌各使用 32 字节随机值；新目录间凭据不同，文件权限为 0600，重复 configure 保留已有 JSON 和凭据。

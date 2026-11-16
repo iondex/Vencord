@@ -457,6 +457,31 @@ test("authenticated ingestion ACKs exact persisted hash; malformed and invalid i
     assert.equal((await fetch(`${base}/api/status`, { headers: { Authorization: "Bearer pair" } })).status, 401);
 });
 
+for (const tokens of [{ pairingToken: "", adminToken: "" }, { pairingToken: "pair", adminToken: "" }, { pairingToken: "", adminToken: "admin" }, { pairingToken: "pair", adminToken: "admin" }]) {
+    test(`HTTP authentication is optional per endpoint: ingestion ${tokens.pairingToken ? "protected" : "open"}, admin ${tokens.adminToken ? "protected" : "open"}`, async context => {
+        const store = fixture(context);
+        const server = createHubHttp(store, tokens);
+        server.listen(0, "127.0.0.1"); await once(server, "listening");
+        context.after(() => new Promise<void>(done => { server.close(() => done()); server.closeAllConnections(); }));
+        const base = `http://127.0.0.1:${(server.address() as any).port}`;
+        const body = JSON.stringify(capture());
+        assert.equal((await fetch(`${base}/forward`, { method: "POST", body })).status, tokens.pairingToken ? 401 : 202);
+        assert.equal((await fetch(`${base}/forward`, { method: "POST", body, headers: { Authorization: "Bearer wrong" } })).status, tokens.pairingToken ? 401 : 202);
+        const headers = tokens.pairingToken ? { Authorization: `Bearer ${tokens.pairingToken}` } : undefined;
+        const response = await fetch(`${base}/forward`, { method: "POST", body, headers });
+        assert.equal(response.status, 202);
+        assert.equal((await response.json()).hash, digest(body));
+        for (const path of ["/api/status", "/api/deliveries", "/api/pause", "/api/resume"]) {
+            const method = ["/api/pause", "/api/resume"].includes(path) ? "POST" : "GET";
+            assert.equal((await fetch(`${base}${path}`, { method })).status, tokens.adminToken ? 401 : 200);
+            assert.equal((await fetch(`${base}${path}`, { method, headers: { Authorization: "Bearer wrong" } })).status, tokens.adminToken ? 401 : 200);
+            assert.equal((await fetch(`${base}${path}`, { method, headers: tokens.adminToken ? { Authorization: `Bearer ${tokens.adminToken}` } : undefined })).status, 200);
+        }
+        assert.equal((await fetch(`${base}/forward`, { method: "POST", body, headers: { ...headers, Origin: "https://browser.test" } })).status, 403);
+        assert.equal((await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${tokens.adminToken}`, Origin: "https://browser.test" } })).status, 403);
+    });
+}
+
 test("DingTalk application errors remain queued even with HTTP 200", async context => {
     const store = fixture(context);
     store.alert("test_fault", "Fault");

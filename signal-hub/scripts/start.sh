@@ -25,7 +25,7 @@ elif [[ ( "$action" == "configure" || "$action" == "serve" ) && ( ! -f "$SIGNAL_
 fi
 if [[ "$action" == "configure" ]]; then
     printf 'Configuration: %s/settings.json\nCredentials: %s/secrets.json\n' "$SIGNAL_HUB_VAR" "$SIGNAL_HUB_VAR"
-    printf 'Configure the connection in Discord Settings > Vencord > Plugins > forwarder.\nUse pairingToken from secrets.json as localPairingToken; select Local and restart Discord.\nRun pnpm hub to start the service.\n'
+    printf 'Configure the connection in Discord Settings > Vencord > Plugins > forwarder.\nLeave localPairingToken empty when pairingToken in secrets.json is empty (the default); select Local and restart Discord.\nRun pnpm hub to start the service.\n'
     exit 0
 fi
 cd -- "$service_directory"

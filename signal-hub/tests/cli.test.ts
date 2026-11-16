@@ -16,7 +16,9 @@ test("CLI init, HTTP capture, shutdown, offline-cache restart and verified backu
     const command = (action: string) => execFileSync(process.execPath, ["--import", "tsx", "src/main.ts", action], { cwd, env: environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     const output = command("init");
     const secrets = JSON.parse(readFileSync(join(directory, "secrets.json"), "utf8"));
-    assert.ok(!output.includes(secrets.pairingToken));
+    assert.equal(secrets.pairingToken, "");
+    assert.equal(secrets.adminToken, "");
+    assert.match(output, /default to empty/);
     assert.throws(() => command("init"));
     const mock = createServer((request, response) => {
         response.setHeader("Content-Type", "application/json");
@@ -56,7 +58,7 @@ test("CLI init, HTTP capture, shutdown, offline-cache restart and verified backu
         if (mock.listening) await new Promise<void>(done => mock.close(() => done()));
         rmSync(directory, { recursive: true, force: true });
     });
-    const getStatus = async () => (await fetch(`${base}/api/status`, { headers: { Authorization: `Bearer ${secrets.adminToken}` } })).json();
+    const getStatus = async () => (await fetch(`${base}/api/status`)).json();
     await start();
     let status: any;
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -69,7 +71,7 @@ test("CLI init, HTTP capture, shutdown, offline-cache restart and verified backu
         schemaVersion: 2, eventId: "cli:1", eventType: "MESSAGE_CREATE", capturedAt: new Date().toISOString(),
         accountId: "1", serverId: "2", channelId: "3", excludedServerIds: [], message: { id: "4", content: "test only" },
     };
-    const submit = async (payload: unknown) => fetch(`${base}/forward`, { method: "POST", headers: { Authorization: `Bearer ${secrets.pairingToken}` }, body: JSON.stringify(payload) });
+    const submit = async (payload: unknown) => fetch(`${base}/forward`, { method: "POST", body: JSON.stringify(payload) });
     assert.equal((await submit(event)).status, 202);
     await stop();
     await new Promise<void>(done => mock.close(() => done()));
@@ -82,6 +84,5 @@ test("CLI init, HTTP capture, shutdown, offline-cache restart and verified backu
     const backups = readdirSync(join(directory, "backups"));
     assert.ok(backups.some(file => file.endsWith(".sqlite3.json")));
     assert.equal(JSON.parse(command("status")).receipts, 2);
-    assert.ok(!logs.includes(secrets.pairingToken));
     assert.ok(!logs.includes("test only"));
 });

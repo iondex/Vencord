@@ -7,6 +7,7 @@
 - 仅注册并默认启用 `forwarder`、`channel-logger` 两个可选功能插件，保留上游必需 core/API。
 - Local 插件负责基础过滤、原始采集、磁盘 outbox 和可靠交接，支持本机和内网服务。路由、存储、Signal、配置同步和补发均在独立服务中。
 - 已有 SQLite 归档、配置离线缓存、投递队列、防自循环、只读 logger/Bot 补采、日志、告警、状态 API 和备份。
+- 2026-11-16 更新：pairing/admin token 设置保留且默认留空；空值时对应采集/管理入口无需 token，非空时独立校验。插件允许空 token，并在空值时省略 Authorization 头。
 - 统一启动入口为 `pnpm hub:configure` / `pnpm hub`，默认运行目录为 `signal-hub/var`；服务配置和凭据使用 `settings.json` / `secrets.json`，连接信息直接在 forwarder 插件设置页填写。
 - 新增逐 route 决策、逐次尝试记录、五次指数退避重试及每分钟修复扫描；详见运行说明。
 - 尚未生产接管、真实 Discord/Bot 权限验收或调用模型；语音功能只完成探索。二进制媒体归档、目标外观重建、人工安全释放工具和 ACK 自动清理尚未实现。

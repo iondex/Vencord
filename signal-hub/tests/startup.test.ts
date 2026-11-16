@@ -41,13 +41,14 @@ test("startup script uses JSON settings, preserves credentials and forwards shut
     assert.match(output, /pairingToken/);
     const secret = readFileSync(join(directory, "secrets.json"), "utf8");
     const credentials = JSON.parse(secret);
+    assert.equal(credentials.pairingToken, "");
+    assert.equal(credentials.adminToken, "");
     const defaults = JSON.parse(readFileSync(join(directory, "settings.json"), "utf8"));
     assert.equal(defaults.host, "127.0.0.1");
     assert.equal(defaults.port, 49321);
     assert.equal(existsSync(join(directory, "plugin-connection.json")), false);
     assert.equal(existsSync(join(directory, "db")), false, "Configure must not start the service");
-    assert.ok(!output.includes(credentials.pairingToken));
-    assert.ok(!output.includes(credentials.adminToken));
+    assert.match(output, /Leave localPairingToken empty/);
     const settings = { ...defaults, host: "0.0.0.0", port, cfBaseUrl: `http://127.0.0.1:${(mock.address() as any).port}` };
     assert.throws(() => command("status"), /No signal-hub database/);
     writeFileSync(join(directory, "settings.json"), JSON.stringify({ ...settings, botHistoryEnabled: "false" }));
@@ -57,8 +58,7 @@ test("startup script uses JSON settings, preserves credentials and forwards shut
     const repeatedOutput = command("configure");
     assert.equal(readFileSync(join(directory, "secrets.json"), "utf8"), secret);
     assert.deepEqual(JSON.parse(readFileSync(join(directory, "settings.json"), "utf8")), settings);
-    assert.ok(!repeatedOutput.includes(credentials.pairingToken));
-    assert.ok(!repeatedOutput.includes(credentials.adminToken));
+    assert.match(repeatedOutput, /Leave localPairingToken empty/);
     const child = processState.child = spawn("bash", [script], { cwd: tmpdir(), env, stdio: ["ignore", "pipe", "pipe"] });
     const exited = processState.exited = once(child, "exit");
     let ready = false;
@@ -68,6 +68,7 @@ test("startup script uses JSON settings, preserves credentials and forwards shut
         await delay(30);
     }
     assert.equal(ready, true);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/status`)).status, 200);
     assert.equal(JSON.parse(command("status")).receipts, 0);
     assert.match(command("backup"), /Created SQLite backup/);
     const watchdog = processState.watchdog = spawn("bash", [script, "watchdog"], { cwd: tmpdir(), env, stdio: ["ignore", "pipe", "pipe"] });
@@ -76,7 +77,6 @@ test("startup script uses JSON settings, preserves credentials and forwards shut
     watchdog.stdout?.on("data", data => { watchdogOutput += data.toString(); });
     for (let attempt = 0; attempt < 100 && !watchdogOutput.includes("watchdog started"); attempt++) await delay(30);
     assert.match(watchdogOutput, /watchdog started; notifications disabled/);
-    assert.ok(!watchdogOutput.includes(credentials.pairingToken));
     watchdog.kill("SIGTERM");
     assert.deepEqual(await watchdogExited, [null, "SIGTERM"]);
     child.kill("SIGTERM");

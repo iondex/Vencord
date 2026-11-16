@@ -121,13 +121,16 @@ async function main() {
     let available = false;
     let wrongAck = false;
     const urls: string[] = [];
+    const authorizations: (string | null)[] = [];
     const transport = createLocalTransport((async (input: any, init: any) => {
         urls.push(String(input));
+        authorizations.push(new Headers(init.headers).get("Authorization"));
         if (!available) throw new Error("offline");
         return new Response(JSON.stringify({ durable: true, eventId: JSON.parse(init.body).eventId, hash: wrongAck ? "wrong" : createHash("sha256").update(init.body).digest("hex") }));
     }) as typeof fetch);
     try {
-        transport.configure({ url: "http://192.168.1.50:49321/forward", runtimeDirectory: directory, token: "pairing-token-for-test-only" });
+        assert.throws(() => transport.configure({ url: "http://192.168.1.50:49321/forward", runtimeDirectory: directory, token: "short" }), /at least 24/);
+        transport.configure({ url: "http://192.168.1.50:49321/forward", runtimeDirectory: directory, token: "" });
         const firstCapture = transport.enqueue(event);
         const pending = join(directory, "spool/forwarder/pending");
         const clientPath = join(directory, "spool/forwarder/client-id");
@@ -159,6 +162,8 @@ async function main() {
         assert.notEqual(otherClient.enqueue(event).eventId, firstCapture.eventId);
         await otherClient.stop();
         assert.ok(urls.every(url => url === "http://192.168.1.50:49321/forward"));
+        assert.ok(authorizations.length > 0);
+        assert.ok(authorizations.every(value => value === null), "Empty token must omit the Authorization header");
         await transport.stop();
         const incomplete = { ...event, eventId: "recovered:create" };
         writeFileSync(join(pending, "recover.tmp"), JSON.stringify(incomplete));
@@ -168,6 +173,7 @@ async function main() {
         assert.equal(readFileSync(clientPath, "utf8"), clientId);
         available = false;
         await transport.drain();
+        assert.equal(authorizations.at(-1), "Bearer pairing-token-for-test-only");
         assert.ok(transport.status().pending >= 1);
         assert.equal(transport.status().quarantined, 2);
         assert.equal(localSkipReason(event.message, { guild_id: "4" }, "1", false, []), null);

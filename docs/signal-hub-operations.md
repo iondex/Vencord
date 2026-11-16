@@ -13,7 +13,7 @@ pnpm hub:configure
 pnpm hub
 ```
 
-统一入口为 `signal-hub/scripts/start.sh`，也可从任意目录用绝对路径执行 `bash /absolute/path/Vencord/signal-hub/scripts/start.sh`。脚本检查 Node >=22.13.0 和 pnpm，在缺少服务依赖时执行 frozen-lockfile 安装，首次运行自动初始化。`pnpm hub:configure` 只创建默认 JSON 配置和随机凭据、打印文件位置及插件设置入口，不启动服务；`pnpm hub` 启动服务，首次启动时也会自动初始化，因此 configure 可省略。另支持 `status`、`backup`、`watchdog`。重复运行保留已有配置和 token，部分配置缺失时明确报错；运维子命令不会自动生成新的配对配置。进程通过 exec 启动，SIGTERM/SIGINT 交给服务执行正常退出。
+统一入口为 `signal-hub/scripts/start.sh`，也可从任意目录用绝对路径执行 `bash /absolute/path/Vencord/signal-hub/scripts/start.sh`。脚本检查 Node >=22.13.0 和 pnpm，在缺少服务依赖时执行 frozen-lockfile 安装，首次运行自动初始化。`pnpm hub:configure` 只创建默认 JSON 配置、打印文件位置及插件设置入口，不启动服务；`pnpm hub` 启动服务，首次启动时也会自动初始化，因此 configure 可省略。另支持 `status`、`backup`、`watchdog`。重复运行保留已有配置和 token，部分配置缺失时明确报错；运维子命令不会自动生成新的配对配置。进程通过 exec 启动，SIGTERM/SIGINT 交给服务执行正常退出。
 
 默认运行目录为仓库下的 `signal-hub/var`。可以通过绝对路径环境变量 `SIGNAL_HUB_VAR` 改变位置。目录及私密文件分别使用 0700、0600 权限。`pnpm hub` 首次启动即可接收并归档，但发送 Discord 或请求模型仍须填写业务凭据。
 
@@ -40,7 +40,7 @@ pnpm hub
 初始化产生：
 
 - `var/settings.json`：监听地址、端口、CF 配置源、排除的 Discord server 和历史恢复设置。
-- `var/secrets.json`：自动生成两个独立的 256 位随机令牌，`pairingToken` 用于插件连接，`adminToken` 用于管理 API；Discord Bot、模型、CF 及告警凭据默认留空。
+- `var/secrets.json`：保留 `pairingToken`、`adminToken` 设置，两者默认均为 `""`，分别表示采集入口、管理 API 无需 token；Discord Bot、模型、CF 及告警凭据默认留空。
 
 不再生成 `plugin-connection.json`。插件连接由 Discord 内的 forwarder 设置页保存，服务不读取该旧文件；已有文件不会被脚本删除。令牌只写入凭据文件，不输出到控制台，也不会因重复 configure 而轮换。
 
@@ -52,7 +52,7 @@ pnpm hub:status
 pnpm hub:backup
 ```
 
-三个命令分别是前台运行、查看状态及备份；不要把它们当作单个前台进程依次执行。`status` 直接读取数据库，主进程配置损坏或缺失时仍可执行状态和备份；尚未创建数据库时明确报错。`GET /healthz` 检查进程 HTTP 存活，认证后的 `GET /api/status` 返回归档/任务状态。HTTP 存活不代表所有目标都能发送，需一起检查任务与告警。
+三个命令分别是前台运行、查看状态及备份；不要把它们当作单个前台进程依次执行。`status` 直接读取数据库，主进程配置损坏或缺失时仍可执行状态和备份；尚未创建数据库时明确报错。`GET /healthz` 检查进程 HTTP 存活，`GET /api/status` 返回归档/任务状态，仅在 `adminToken` 非空时要求认证。HTTP 存活不代表所有目标都能发送，需一起检查任务与告警。
 
 ## 加载 Discord 插件
 
@@ -73,7 +73,7 @@ pnpm inject
 | `mode` | **Local** |
 | `localServerUrl` | 默认 `http://127.0.0.1:49321/forward`；服务在内网时填写该机器的可访问 URL |
 | `localRuntimeDirectory` | Discord 机器上 checkout 的绝对路径，例如 `/absolute/path/Vencord/signal-hub/var` |
-| `localPairingToken` | 服务机器上 `secrets.json` 中的 `pairingToken`，不要使用 `adminToken` |
+| `localPairingToken` | 默认留空；仅在服务的 `pairingToken` 非空时填写相同值 |
 | `excludedServerIds` | 按需填写逗号分隔的 server ID，并与服务的 `settings.json` 保持一致 |
 
 保存后完整退出并重启 Discord。插件配置使用 Vencord 自带的设置存储，无需编辑额外连接文件。内网部署时队列目录仍填 Discord 机器上的绝对路径。
@@ -86,7 +86,7 @@ pnpm inject
 | 独立心跳告警 | `pnpm hub:watchdog` |
 | 可选频道日志及补采来源 | `pnpm logger -- --dir /absolute/path/Vencord/signal-hub/var/channel-logger` |
 
-主服务会自行维护解析、投递、补发、配置同步和业务告警任务，不需要另外启动投递 worker。watchdog 没有钉钉凭据时启动输出 `notifications disabled`。仅设置 Local 和配对凭据可以采集归档；实际转发需要服务端发送凭据及可用 routes。
+主服务会自行维护解析、投递、补发、配置同步和业务告警任务，不需要另外启动投递 worker。watchdog 没有钉钉凭据时启动输出 `notifications disabled`。仅设置 Local 和连接地址、队列目录即可按默认配置采集归档；实际转发需要服务端发送凭据及可用 routes。
 
 可用 `curl --fail http://127.0.0.1:49321/healthz` 检查 HTTP 存活，用 `pnpm hub:status` 查看任务与告警。开发时可使用 `pnpm build --dev --watch` 持续构建，插件设置中标记需重启的连接参数仍应重启 Discord 后生效。
 
@@ -98,7 +98,7 @@ pnpm inject
 
 1. 在服务机器安装并初始化 `signal-hub`，把 `settings.json` 的 `host` 改成机器的内网地址，或由运维指定监听地址。
 2. 插件的 `localServerUrl` 填成例如 `http://192.168.1.50:49321/forward`；也支持部署了 TLS 的 `https://hub.lan/forward`。
-3. `localPairingToken` 使用该服务生成的配对令牌。
+3. `localPairingToken` 默认留空；如果服务配置了非空 `pairingToken`，则填写相同值。
 4. 插件的 `localRuntimeDirectory` 必须是 **运行 Discord 的机器**上的绝对路径，例如 `/Users/example/dev/Vencord/signal-hub/var`，不能填写另一台机器的路径。
 5. 两端的 `excludedServerIds` 保持相同集合，可以都为空。服务端当前排除的来源只归档；消息声明来源被插件排除、服务端却未排除时进入 `safety_pending`。其他 server 的名单变化不会阻塞该来源的旧积压。
 
@@ -106,7 +106,7 @@ pnpm inject
 
 文字链路的构建 profile 注册 `forwarder`、`channel-logger` 及上游必需的 `_api` / `_core`。两插件默认启用，显式关闭的设置会被保留。当前 `local` 分支另已合入并行任务的 `transcribe` 插件；它有独立的设置和实现，本说明中的 Local/Remote 切换仅指 forwarder。`ChannelLogger` / `channellogger` 的旧设置迁移到 `channel-logger`；新名称已有设置时优先保留新设置。
 
-原有用户使用的 remote 行为作为迁移默认值保留，避免升级时凭空把消息切到尚未配置的接收服务。配置完配对信息后显式选择 Local。Local 完全独立，不会转回 CF `/forward`。
+原有用户使用的 remote 行为作为迁移默认值保留，避免升级时凭空把消息切到尚未配置的接收服务。配置完连接信息后显式选择 Local。Local 完全独立，不会转回 CF `/forward`。
 
 插件设置中的 `mode` 选项显示为 `Remote` / `Local`，配置值分别为 `remote` / `local`，本机和内网部署都使用 Local。切换模式后重启客户端；重启前继续使用当前已启动的模式，设置页显示实际运行模式和待重启提示。Local 的队列状态和健康检查位于同一插件设置页。
 
@@ -116,15 +116,17 @@ pnpm inject
 
 | 字段 | 用途 |
 | --- | --- |
-| `pairingToken` | 插件写入入口；初始化自动生成 |
-| `adminToken` | 本地运维 API，必须与配对令牌不同 |
+| `pairingToken` | 插件写入入口；默认 `""` 表示无需 token |
+| `adminToken` | 本地运维 API；默认 `""` 表示无需 token |
 | `botToken` | 确认发送身份、目标频道归属、发送及可选历史读取 |
 | `webhooks` | 可选 `目标频道 ID: webhook URL` 映射；使用前确认 webhook 实际频道 |
 | `modelApiKey` | Signal 模型解析 |
 | `cfToken` | 配置读取需要 Authorization 时使用 |
 | `dingTalkWebhook` | 故障/恢复告警 |
 
-对应环境变量：`DISCORD_BOT_TOKEN`、`OPENAI_KEY` / `OPENAI_API_KEY`、`SIGNAL_HUB_CF_TOKEN`、`DINGTALK_WEBHOOK`。这些值只在服务进程读取，不传到插件或写入日志。已从插件源码删除原先内置的钉钉 URL；remote 告警默认关闭，用户已有设置不被重写。
+两个入口独立判断 token：可全部留空，也可仅保护其中一个入口。非空 token 沿用至少 24 字符校验，两者均非空时必须不同；插件只发送配对 token，留空时不发送 Authorization 头。修改服务 token 后重启服务，修改插件 token 后重启 Discord。已有配置不会因升级或重复 configure 被自动清空；需要关闭鉴权时将对应字段设为 `""`。
+
+对应业务凭据环境变量：`DISCORD_BOT_TOKEN`、`OPENAI_KEY` / `OPENAI_API_KEY`、`SIGNAL_HUB_CF_TOKEN`、`DINGTALK_WEBHOOK`。这些值只在服务进程读取，不传到插件或写入日志。已从插件源码删除原先内置的钉钉 URL；remote 告警默认关闭，用户已有设置不被重写。
 
 CF 的公开管理接口不返回 Bot、模型和 webhook 的秘密值。优先使用现有授权可读的配置；Workers 已上传 secret 不支持直接读回明文，需要原值或用户补充。这里没有构造 secret 导出接口，也没有向生产发送测试通知。
 
