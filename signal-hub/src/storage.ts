@@ -42,6 +42,11 @@ export function openStore(path: string) {
         db.prepare("UPDATE jobs SET due_at=coalesce((SELECT created_at FROM messages WHERE message_key=jobs.message_key),?) WHERE state='pending' AND due_at=0").run(Date.now());
     });
     db.exec("CREATE INDEX IF NOT EXISTS messages_pending ON messages(state,created_at); CREATE INDEX IF NOT EXISTS messages_deferred ON messages(state,checked_at,created_at)");
+    db.exec(`CREATE INDEX IF NOT EXISTS messages_created ON messages(created_at);
+        CREATE INDEX IF NOT EXISTS receipts_received ON receipts(received_at);
+        CREATE INDEX IF NOT EXISTS attempts_finished ON delivery_attempts(finished_at,outcome);
+        CREATE INDEX IF NOT EXISTS attempts_outcome_id ON delivery_attempts(outcome,id);
+        CREATE INDEX IF NOT EXISTS outputs_updated ON sink_deliveries(state,updated_at)`);
     const jobColumns = db.prepare("PRAGMA table_info(jobs)").all() as any[];
     for (const column of ["retry_count", "recovery_cycles"]) {
         if (!jobColumns.some(existing => existing.name === column)) db.exec(`ALTER TABLE jobs ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`);

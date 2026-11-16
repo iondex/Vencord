@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="color-scheme" content="light dark" />
+        <title>Signal-hub · 运行状态</title>
+        <link rel="icon" href="data:," />
+        <link rel="stylesheet" href="/dashboard.css" />
+        <script src="/dashboard.js" defer></script>
+    </head>
+    <body>
+        <main>
+            <header>
+                <div>
+                    <h1>Signal-hub</h1>
+                    <p>消息归档与投递状态</p>
+                </div>
+                <div class="live">
+                    <span id="health" role="status">正在连接</span
+                    ><button id="refresh" type="button">立即刷新</button
+                    ><small id="updated">每 2 秒自动更新</small>
+                </div>
+            </header>
+            <p id="notice" role="status">正在读取服务状态…</p>
+            <section aria-label="消息概况" class="overview">
+                <dl>
+                    <dt>累计归档消息</dt>
+                    <dd id="messages">—</dd>
+                    <small id="received">采集观察 — 次</small>
+                </dl>
+                <dl>
+                    <dt>近 1 小时收 / 发</dt>
+                    <dd id="hour">—</dd>
+                    <small id="today">今日收 / 发 —</small>
+                </dl>
+                <dl>
+                    <dt>待完成投递</dt>
+                    <dd id="queued">—</dd>
+                    <small id="oldest">最早等待 —</small>
+                </dl>
+                <dl>
+                    <dt>24h 尝试成功率</dt>
+                    <dd id="success">—</dd>
+                    <small id="failed">失败尝试 — 次</small>
+                </dl>
+            </section>
+            <section class="flow">
+                <div class="section-heading">
+                    <h2>消息流水</h2>
+                    <span>最近 60 分钟 · 每格 1 分钟</span>
+                </div>
+                <div class="legend">
+                    <span class="capture">新归档</span><span class="delivery">确认送达</span
+                    ><span class="failure">失败尝试</span><span id="chart-scale"></span>
+                </div>
+                <svg
+                    id="timeline"
+                    viewBox="0 0 900 180"
+                    role="img"
+                    aria-label="最近 60 分钟消息收发趋势"
+                ></svg>
+                <div class="chart-times">
+                    <span id="from">—</span><span id="chart-empty"></span><span>现在</span>
+                </div>
+            </section>
+            <div class="details">
+                <section>
+                    <div class="section-heading">
+                        <h2>运行与配置</h2>
+                        <span id="mode">—</span>
+                    </div>
+                    <dl class="facts" id="runtime"></dl>
+                </section>
+                <section>
+                    <div class="section-heading">
+                        <h2>投递流水线</h2>
+                        <span>任务包含分段与 Signal</span>
+                    </div>
+                    <div id="pipeline" class="pipeline"></div>
+                    <p id="archive-states" class="muted"></p>
+                </section>
+            </div>
+            <section>
+                <div class="section-heading">
+                    <h2>路由状态 <small id="route-count"></small></h2>
+                    <label class="search"
+                        ><span class="sr-only">搜索路由或目标频道</span
+                        ><input id="search" type="search" placeholder="搜索路由或目标频道"
+                    /></label>
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>路由</th>
+                                <th>目标频道</th>
+                                <th>匹配消息</th>
+                                <th>已送达任务</th>
+                                <th>待完成</th>
+                                <th>需关注</th>
+                                <th>最近送达</th>
+                            </tr>
+                        </thead>
+                        <tbody id="routes"></tbody>
+                    </table>
+                </div>
+                <p id="route-empty" class="empty" hidden>没有匹配的路由。</p>
+            </section>
+            <div class="details alerts">
+                <section>
+                    <div class="section-heading">
+                        <h2>当前告警</h2>
+                        <span id="alert-count">—</span>
+                    </div>
+                    <ul id="alerts" class="event-list"></ul>
+                </section>
+                <section>
+                    <div class="section-heading">
+                        <h2>最近失败尝试</h2>
+                        <span>最近 20 条</span>
+                    </div>
+                    <ul id="failures" class="event-list"></ul>
+                </section>
+            </div>
+            <footer>
+                只读监控 · 消息数据库全量保留 · 今日以 Asia/Shanghai 计算 · 成功率按近 24h
+                发送预检与发送尝试计算，重试计为独立尝试
+            </footer>
+        </main>
+    </body>
+</html>

@@ -19,6 +19,7 @@ test("runtime initialization validates addresses before writing and preserves ex
     const settings = loadSettings(directory, {});
     assert.equal(settings.host, "::");
     assert.equal(settings.port, 49325);
+    assert.equal(settings.dashboardPort, 9900);
     const secrets = loadSecrets(directory, {});
     assert.equal(secrets.pairingToken, "");
     assert.equal(secrets.adminToken, "");

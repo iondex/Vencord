@@ -1,6 +1,7 @@
 import { LocalRouteTest, LocalServiceStatus } from "../contracts/diagnostics.js";
 import { CaptureEnvelope } from "../contracts/ingest.js";
 import { testModeAllowsRoute } from "./queue.js";
+import { readStatistics } from "./statistics.js";
 import { Store } from "./storage.js";
 
 export function localServiceStatus(store: Store, excludedServerIds: string[]): LocalServiceStatus {
@@ -14,6 +15,7 @@ export function localServiceStatus(store: Store, excludedServerIds: string[]): L
             serverId: route.serverId, targetChannelId: route.targetChannelId, excluded: excludedServerIds.includes(route.serverId),
         })),
         jobs: store.db.prepare("SELECT state,count(*) AS total FROM jobs GROUP BY state").all() as LocalServiceStatus["jobs"],
+        statistics: readStatistics(store, excludedServerIds).summary,
     };
 }
 

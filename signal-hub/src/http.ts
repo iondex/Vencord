@@ -17,7 +17,8 @@ function json(response: ServerResponse, status: number, body: unknown) {
     response.end(JSON.stringify(body));
 }
 
-export function createHubHttp(store: Store, options: { pairingToken: string; adminToken: string; excludedServerIds?: string[]; maxBodyBytes?: number; log?: (event: string, fields?: any) => void; wake?: () => void; setTestMode?: (enabled: boolean) => void; }) {
+export function createHubHttp(store: Store, options: { pairingToken: string; adminToken: string; excludedServerIds?: string[]; dashboardPort?: number; maxBodyBytes?: number; log?: (event: string, fields?: any) => void; wake?: () => void; setTestMode?: (enabled: boolean) => void; }) {
+    const serviceStatus = () => ({ ...localServiceStatus(store, options.excludedServerIds ?? []), dashboardPort: options.dashboardPort ?? 9900 });
     return createServer(async (request, response) => {
         try {
             const url = new URL(request.url ?? "/", "http://signal-hub.local");
@@ -30,7 +31,7 @@ export function createHubHttp(store: Store, options: { pairingToken: string; adm
             if (!authorized(request, ingest || local ? options.pairingToken : options.adminToken)) { json(response, 401, { error: "unauthorized" }); return; }
             if (request.headers.origin) { json(response, 403, { error: "browser_origin_not_allowed" }); return; }
             if (request.method === "GET" && url.pathname === "/api/local/status") {
-                json(response, 200, localServiceStatus(store, options.excludedServerIds ?? [])); return;
+                json(response, 200, serviceStatus()); return;
             }
             if (request.method === "GET" && url.pathname.startsWith("/api/local/tests/")) {
                 const requestId = url.pathname.slice("/api/local/tests/".length);
@@ -70,7 +71,7 @@ export function createHubHttp(store: Store, options: { pairingToken: string; adm
                     if (options.setTestMode) options.setTestMode(input.enabled);
                     else store.setMetadata("test_mode", String(input.enabled));
                     options.log?.("test_mode_changed", { enabled: input.enabled });
-                    json(response, 200, localServiceStatus(store, options.excludedServerIds ?? []));
+                    json(response, 200, serviceStatus());
                     options.wake?.();
                     return;
                 }

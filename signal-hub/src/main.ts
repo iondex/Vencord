@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { flushAlerts, refreshHealthAlerts } from "./alerts.js";
 import { createConfigSync, digest, validateSnapshot } from "./config.js";
+import { createDashboard } from "./dashboard.js";
 import { createDiscordSender } from "./discord.js";
 import { writeDurable } from "./files.js";
 import { createHubHttp } from "./http.js";
@@ -125,7 +126,7 @@ if (command === "init") {
             }
         }
         const server = createHubHttp(store, {
-            pairingToken: secrets.pairingToken, adminToken: secrets.adminToken, excludedServerIds, log, wake: tick,
+            pairingToken: secrets.pairingToken, adminToken: secrets.adminToken, excludedServerIds, dashboardPort: settings.dashboardPort, log, wake: tick,
             setTestMode(enabled) {
                 const path = join(runtimeDirectory, "settings.json");
                 const current = JSON.parse(readFileSync(path, "utf8"));
@@ -135,6 +136,17 @@ if (command === "init") {
         });
         server.requestTimeout = 30_000;
         server.headersTimeout = 15_000;
+        const dashboard = createDashboard(store, { databasePath, excludedServerIds });
+        dashboard.requestTimeout = 10_000;
+        dashboard.headersTimeout = 10_000;
+        dashboard.on("error", () => {
+            log("dashboard_listen_failed");
+            store.alert("dashboard_listen_failed", "Status dashboard could not bind its port; forwarding remains active");
+        });
+        dashboard.listen(settings.dashboardPort, settings.host, () => {
+            store.resolveAlert("dashboard_listen_failed");
+            log("dashboard_started", { host: settings.host, port: settings.dashboardPort });
+        });
         const intervals: ReturnType<typeof setInterval>[] = [];
         function every(milliseconds: number, event: string, work: () => Promise<unknown> | unknown) {
             let running = false;
@@ -180,6 +192,7 @@ if (command === "init") {
             stopping = true;
             for (const interval of intervals) clearInterval(interval);
             await new Promise<void>(resolveClose => { server.close(() => resolveClose()); server.closeIdleConnections(); });
+            await new Promise<void>(resolveClose => { dashboard.close(() => resolveClose()); dashboard.closeIdleConnections(); });
             await Promise.allSettled([...tasks]);
             await network?.close();
             log("hub_stopped");

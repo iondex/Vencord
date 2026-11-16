@@ -10,6 +10,7 @@ import { writeDurable } from "./files.js";
 const settingsSchema = z.object({
     host: z.string().trim().min(1),
     port: z.number().int().min(1).max(65535),
+    dashboardPort: z.number().int().min(1).max(65535).default(9900),
     cfBaseUrl: z.string(),
     excludedServerIds: z.array(z.string().regex(/^\d{1,32}$/)).default([]),
     loggerDatabase: z.string().default(""),
@@ -36,6 +37,7 @@ export function getRuntimeDirectory(environment = process.env) {
 
 function parseSettings(value: unknown) {
     const settings = settingsSchema.parse(value);
+    if (settings.port === settings.dashboardPort) throw new Error("API and dashboard ports must differ");
     validateServiceUrl(settings.cfBaseUrl);
     return settings;
 }

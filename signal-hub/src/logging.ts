@@ -26,6 +26,7 @@ function consoleMessage(event: string, fields: Record<string, unknown>) {
         capture_quarantined: "Capture quarantined", message_planned: "Message planned", delivery_sent: "Delivered",
         delivery_finished: "Delivery pending", delivery_repair_scheduled: "Delivery repair scheduled", route_test_queued: "Route test queued",
         test_mode_changed: "Test mode changed",
+        dashboard_started: "Status dashboard started", dashboard_listen_failed: "Status dashboard unavailable",
     };
     const states: Record<string, string> = {
         pending: "queued", leased: "preparing", sending: "sending", sent: "sent", retry_wait: "awaiting repair",
