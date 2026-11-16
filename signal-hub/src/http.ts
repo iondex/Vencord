@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 
 import { validateCapture } from "../contracts/ingest.js";
+import { createLocalRouteTest, localRouteTest, localServiceStatus } from "./diagnostics.js";
 import { Store } from "./storage.js";
 
 function authorized(request: IncomingMessage, token: string) {
@@ -16,7 +17,7 @@ function json(response: ServerResponse, status: number, body: unknown) {
     response.end(JSON.stringify(body));
 }
 
-export function createHubHttp(store: Store, options: { pairingToken: string; adminToken: string; maxBodyBytes?: number; log?: (event: string, fields?: any) => void; wake?: () => void; }) {
+export function createHubHttp(store: Store, options: { pairingToken: string; adminToken: string; excludedServerIds?: string[]; maxBodyBytes?: number; log?: (event: string, fields?: any) => void; wake?: () => void; }) {
     return createServer(async (request, response) => {
         try {
             const url = new URL(request.url ?? "/", "http://signal-hub.local");
@@ -25,8 +26,18 @@ export function createHubHttp(store: Store, options: { pairingToken: string; adm
                 return;
             }
             const ingest = request.method === "POST" && url.pathname === "/forward";
-            if (!authorized(request, ingest ? options.pairingToken : options.adminToken)) { json(response, 401, { error: "unauthorized" }); return; }
+            const local = url.pathname.startsWith("/api/local/");
+            if (!authorized(request, ingest || local ? options.pairingToken : options.adminToken)) { json(response, 401, { error: "unauthorized" }); return; }
             if (request.headers.origin) { json(response, 403, { error: "browser_origin_not_allowed" }); return; }
+            if (request.method === "GET" && url.pathname === "/api/local/status") {
+                json(response, 200, localServiceStatus(store, options.excludedServerIds ?? [])); return;
+            }
+            if (request.method === "GET" && url.pathname.startsWith("/api/local/tests/")) {
+                const requestId = url.pathname.slice("/api/local/tests/".length);
+                if (!/^[a-f\d-]{36}$/.test(requestId)) { json(response, 400, { error: "invalid_test_request" }); return; }
+                const test = localRouteTest(store, requestId);
+                json(response, test ? 200 : 404, test ?? { error: "test_not_found" }); return;
+            }
             if (request.method === "GET" && url.pathname === "/api/status") { json(response, 200, store.status()); return; }
             if (request.method === "GET" && url.pathname === "/api/deliveries") {
                 const jobId = url.searchParams.get("jobId");
@@ -42,6 +53,27 @@ export function createHubHttp(store: Store, options: { pairingToken: string; adm
                 store.setMetadata("paused", String(url.pathname === "/api/pause"));
                 if (url.pathname === "/api/resume") store.db.prepare("UPDATE jobs SET state='pending' WHERE state='held' AND error='current_safety_or_config_veto'").run();
                 json(response, 200, { ok: true });
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/local/test") {
+                const chunks: Buffer[] = [];
+                let bytes = 0;
+                for await (const chunk of request) {
+                    bytes += Buffer.byteLength(chunk);
+                    if (bytes > 4096) { json(response, 413, { error: "body_too_large" }); request.resume(); return; }
+                    chunks.push(Buffer.from(chunk));
+                }
+                let input: any;
+                try { input = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { json(response, 400, { error: "malformed_json" }); return; }
+                if (!input || typeof input.requestId !== "string" || !/^[a-f\d-]{36}$/.test(input.requestId)
+                    || typeof input.routeId !== "string" || !input.routeId || input.routeId.length > 512) {
+                    json(response, 400, { error: "invalid_test_request" }); return;
+                }
+                const result = createLocalRouteTest(store, input.requestId, input.routeId, options.excludedServerIds ?? []);
+                if (result.error) { json(response, result.status!, { error: result.error }); return; }
+                options.log?.("route_test_queued", { requestId: input.requestId, routeId: input.routeId, jobId: result.test!.jobId });
+                json(response, 202, result.test);
+                options.wake?.();
                 return;
             }
             if (!ingest) { json(response, 404, { error: "not_found" }); return; }

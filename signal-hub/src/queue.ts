@@ -71,13 +71,20 @@ export function executable(store: Store, job: any, excludedServerIds: string[]) 
         config = store.config(job.config_hash);
         currentConfig = store.config();
     } catch { return undefined; }
-    const row = store.db.prepare("SELECT envelope FROM messages WHERE message_key=?").get(job.message_key) as any;
+    const row = store.db.prepare("SELECT envelope,state FROM messages WHERE message_key=?").get(job.message_key) as any;
     const event = JSON.parse(row.envelope) as CaptureEnvelope;
     const route = config?.snapshot.routes.find(route => route.routeId === job.route_id && route.enabled);
     const safety = safetyState(store, event, excludedServerIds);
     if (safety || !config || !route || !currentConfig || store.metadata("paused") === "true") return undefined;
-    const currentMatches = matchingRoutes(currentConfig.snapshot, event);
-    if (currentMatches.length !== 1 || currentMatches[0].routeId !== route.routeId) return undefined;
+    if (row.state === "route_test") {
+        const currentRoute = currentConfig.snapshot.routes.find(candidate => candidate.routeId === route.routeId && candidate.enabled);
+        if (job.kind !== "deliver" || !currentRoute || currentRoute.serverId !== route.serverId
+            || currentRoute.channelId !== route.channelId || currentRoute.senderId !== route.senderId
+            || currentRoute.targetChannelId !== job.target) return undefined;
+    } else {
+        const currentMatches = matchingRoutes(currentConfig.snapshot, event);
+        if (currentMatches.length !== 1 || currentMatches[0].routeId !== route.routeId) return undefined;
+    }
     if ((job.kind === "extract" || job.kind === "signal")
         && (!signalEnabled(currentConfig.snapshot, route.routeId) || !signalEnabled(config.snapshot, route.routeId))) return undefined;
     if (job.kind === "deliver" && job.target !== route.targetChannelId) return undefined;

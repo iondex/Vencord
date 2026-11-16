@@ -20,7 +20,7 @@ if (!["init", "serve", "status", "backup"].includes(command)) throw new Error("U
 
 if (command === "init") {
     initializeRuntime(runtimeDirectory);
-    console.log(`Created settings.json and secrets.json under ${runtimeDirectory}; pairingToken and adminToken default to empty, disabling their respective authentication. Configure the URL and queue directory in Discord Settings > Vencord > Plugins > forwarder, leave the token empty, then select Local and restart Discord.`);
+    console.log(`Created settings.json and secrets.json under ${runtimeDirectory}; pairingToken and adminToken default to empty, disabling their respective authentication. Configure the URL in Discord Settings > Vencord > Plugins > forwarder > Local, leave the token empty, then restart Discord. The collector queue directory is automatic.`);
 } else {
     const configuration = command === "serve" ? { settings: loadSettings(runtimeDirectory), secrets: loadSecrets(runtimeDirectory) } : undefined;
     const databasePath = join(runtimeDirectory, "db", "signal-hub.sqlite3");
@@ -120,7 +120,7 @@ if (command === "init") {
                 }
             }
         }
-        const server = createHubHttp(store, { pairingToken: secrets.pairingToken, adminToken: secrets.adminToken, log, wake: tick });
+        const server = createHubHttp(store, { pairingToken: secrets.pairingToken, adminToken: secrets.adminToken, excludedServerIds, log, wake: tick });
         server.requestTimeout = 30_000;
         server.headersTimeout = 15_000;
         const intervals: ReturnType<typeof setInterval>[] = [];
