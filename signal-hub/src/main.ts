@@ -27,7 +27,6 @@ if (command === "init") {
     if (!configuration && !existsSync(databasePath)) throw new Error("No signal-hub database exists; start the service before status or backup");
     const store = openStore(databasePath);
     chmodSync(databasePath, 0o600);
-    const log = createLogger(join(runtimeDirectory, "logs"));
     if (command === "backup") {
         const directory = join(runtimeDirectory, "backups");
         mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -48,6 +47,7 @@ if (command === "init") {
         store.close();
     } else if (configuration) {
         const { settings, secrets } = configuration;
+        const log = createLogger(join(runtimeDirectory, "logs"));
         const { excludedServerIds } = settings;
         let stopping = false;
         const sender = createDiscordSender(store, secrets, excludedServerIds, fetch, log);
@@ -126,11 +126,12 @@ if (command === "init") {
         const intervals: ReturnType<typeof setInterval>[] = [];
         function every(milliseconds: number, event: string, work: () => Promise<unknown> | unknown) {
             let running = false;
-            intervals.push(setInterval(() => {
+            const run = () => {
                 if (stopping || running) return;
                 running = true;
                 void background(event, work).finally(() => { running = false; });
-            }, milliseconds));
+            };
+            intervals.push(setInterval(run, milliseconds));
         }
         server.on("error", () => { log("listen_failed"); void shutdown(); process.exitCode = 1; });
         server.listen(settings.port, settings.host, () => {
@@ -170,6 +171,7 @@ if (command === "init") {
             await Promise.allSettled([...tasks]);
             log("hub_stopped");
             store.close();
+            await log.close();
         }
         process.once("SIGINT", () => { void shutdown(); });
         process.once("SIGTERM", () => { void shutdown(); });

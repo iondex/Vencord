@@ -1,5 +1,9 @@
-import { appendFileSync, mkdirSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { Writable } from "node:stream";
+
+import winston from "winston";
+import DailyRotateFile from "winston-daily-rotate-file";
 
 type LogFields = Record<string, string | number | boolean | null>;
 
@@ -15,29 +19,29 @@ function levelFor(event: string, fields: LogFields) {
     return "info";
 }
 
-function consoleMessage(event: string, fields: LogFields) {
+function consoleMessage(event: string, fields: Record<string, unknown>) {
     const labels: Record<string, string> = {
-        hub_started: "服务已启动", hub_stopped: "服务已停止", config_sync_ok: "配置同步完成",
-        config_sync_failed_using_cache: "配置同步失败，继续使用缓存", capture_committed: "消息已保存",
-        capture_quarantined: "消息已隔离", message_planned: "消息处理", delivery_sent: "转发成功",
-        delivery_finished: "投递暂未完成", delivery_repair_scheduled: "已安排补发", route_test_queued: "路由测试已入队",
+        hub_started: "Hub started", hub_stopped: "Hub stopped", config_sync_ok: "Configuration synced",
+        config_sync_failed_using_cache: "Configuration sync failed; using cache", capture_committed: "Capture saved",
+        capture_quarantined: "Capture quarantined", message_planned: "Message planned", delivery_sent: "Delivered",
+        delivery_finished: "Delivery pending", delivery_repair_scheduled: "Delivery repair scheduled", route_test_queued: "Route test queued",
     };
     const states: Record<string, string> = {
-        pending: "等待发送", leased: "准备发送", sending: "发送中", sent: "已送达", retry_wait: "等待补发",
-        uncertain: "结果待对账", held: "安全检查暂缓", dead: "发送失败", review: "待检查", routed: "已入队",
-        no_matching_route: "未匹配路由", waiting_config: "等待配置", route_conflict: "路由冲突", safety_pending: "等待安全检查",
+        pending: "queued", leased: "preparing", sending: "sending", sent: "sent", retry_wait: "awaiting repair",
+        uncertain: "awaiting reconciliation", held: "held for safety", dead: "failed", review: "needs review", routed: "queued",
+        no_matching_route: "no matching route", waiting_config: "waiting for configuration", route_conflict: "route conflict", safety_pending: "waiting for safety verification",
     };
     const details: string[] = [];
     if (fields.host !== undefined) details.push(`${fields.host}:${fields.port}`);
-    if (fields.routeName || fields.routeId) details.push(`路由 ${fields.routeName || fields.routeId}`);
+    if (fields.routeName || fields.routeId) details.push(`route ${fields.routeName || fields.routeId}`);
     if (fields.target) details.push(`→ ${fields.target}`);
     if (fields.state && event !== "delivery_sent") details.push(states[String(fields.state)] ?? String(fields.state));
     if (fields.code || fields.reason) details.push(String(fields.code || fields.reason));
-    if (fields.attempts) details.push(`第 ${fields.attempts} 次`);
-    if (fields.jobs !== undefined) details.push(`${fields.jobs} 个任务`);
+    if (fields.attempts) details.push(`attempt ${fields.attempts}`);
+    if (fields.jobs !== undefined) details.push(`${fields.jobs} jobs`);
     if (fields.durationMs !== undefined) details.push(`${fields.durationMs}ms`);
-    if (fields.jobId) details.push(`任务 ${String(fields.jobId).slice(0, 8)}`);
-    const label = fields.reconciled ? "对账确认送达" : labels[event] ?? event;
+    if (fields.jobId) details.push(`job ${String(fields.jobId).slice(0, 8)}`);
+    const label = fields.reconciled ? "Delivery confirmed by reconciliation" : labels[event] ?? event;
     return [label, ...details].join(" · ").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
 }
 
@@ -47,35 +51,60 @@ export function createLogger(directory: string, options: {
     color?: boolean;
     debug?: boolean;
 } = {}) {
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
     const output = options.output ?? (line => { process.stdout.write(line); });
     const errorOutput = options.errorOutput ?? (line => { process.stderr.write(line); });
     const color = options.color ?? (Boolean(process.stdout.isTTY) && !Object.hasOwn(process.env, "NO_COLOR") && process.env.TERM !== "dumb");
     const debug = options.debug ?? process.env.SIGNAL_HUB_LOG_LEVEL === "debug";
-    let part = 0;
-    let fileFailureReported = false;
-    return (event: string, fields: LogFields = {}) => {
-        const level = levelFor(event, fields);
-        const now = new Date();
-        const record = { time: now.toISOString(), level, event, ...fields };
-        const body = `${JSON.stringify(record)}\n`;
-        let path = join(directory, `hub-${record.time.slice(0, 10)}-${part}.jsonl`);
-        try {
-            try { if (statSync(path).size >= 10 * 1024 * 1024) path = join(directory, `hub-${record.time.slice(0, 10)}-${++part}.jsonl`); } catch {}
-            appendFileSync(path, body, { mode: 0o600 });
-            fileFailureReported = false;
-        } catch {
-            if (!fileFailureReported) try { errorOutput("Signal-hub 日志文件写入失败，请检查目录和磁盘\n"); } catch {}
-            fileFailureReported = true;
-        }
-        if (level === "debug" && !debug) return;
-        const success = event === "delivery_sent";
-        const tag = success ? "✓" : { debug: "调试", info: "信息", warn: "警告", error: "错误" }[level];
-        const shade = success ? 32 : { debug: 90, info: 36, warn: 33, error: 31 }[level];
-        const prefix = color ? `\x1b[${shade}m${tag}\x1b[0m` : tag;
-        const time = now.toLocaleTimeString("zh-CN", { hour12: false });
-        try { output(`${time} ${prefix} ${consoleMessage(event, fields)}\n`); } catch {}
-    };
+    let lastFailure = -Infinity;
+    function reportFailure() {
+        if (Date.now() - lastFailure < 60_000) return;
+        lastFailure = Date.now();
+        try { errorOutput("Signal-hub log file operation failed; check the directory and disk\n"); } catch {}
+    }
+    const consoleTransport = new winston.transports.Stream({
+        level: debug ? "debug" : "info",
+        stream: new Writable({ write(chunk, _encoding, done) { try { output(chunk.toString()); } catch {} done(); } }),
+        format: winston.format.printf(info => {
+            const level = info.level as ReturnType<typeof levelFor>;
+            const event = String(info.message);
+            const success = event === "delivery_sent";
+            const tag = success ? "✓" : { debug: "DEBUG", info: "INFO", warn: "WARN", error: "ERROR" }[level];
+            const shade = success ? 32 : { debug: 90, info: 36, warn: 33, error: 31 }[level];
+            const prefix = color ? `\x1b[${shade}m${tag}\x1b[0m` : tag;
+            const time = new Date(String(info.time)).toLocaleTimeString("en-GB", { hour12: false });
+            return `${time} ${prefix} ${consoleMessage(event, info)}`;
+        }),
+    });
+    const logger = winston.createLogger({ level: "debug", transports: [consoleTransport] });
+    logger.on("error", reportFailure);
+    let file: DailyRotateFile | undefined;
+    let fileFailed = false;
+    try {
+        mkdirSync(directory, { recursive: true, mode: 0o700 });
+        file = new DailyRotateFile({
+            dirname: directory, filename: "hub-%DATE%", extension: ".jsonl", datePattern: "YYYY-MM-DD", utc: true,
+            maxSize: "10m", maxFiles: "7d", zippedArchive: true, auditFile: join(directory, ".rotation-audit.json"),
+            options: { flags: "a", mode: 0o600 },
+            format: winston.format.printf(({ time, level, message, ...fields }) => JSON.stringify({ time, level, event: message, ...fields })),
+        });
+        file.on("error", reportFailure);
+        file.on("archive", (path: string) => { try { chmodSync(path, 0o600); } catch { reportFailure(); } });
+        file.logStream.on("error", () => { fileFailed = true; reportFailure(); });
+        logger.add(file);
+    } catch { reportFailure(); }
+    let closing: Promise<void> | undefined;
+    return Object.assign((event: string, fields: LogFields = {}) => {
+        if (closing) return;
+        try { logger.log(levelFor(event, fields), event, { time: new Date().toISOString(), ...fields }); } catch { reportFailure(); }
+    }, {
+        close: () => closing ??= new Promise<void>(done => {
+            if (file && !fileFailed) {
+                file.logStream.once("finish", done);
+                file.logStream.once("error", done);
+            } else logger.once("finish", done);
+            logger.end();
+        }),
+    });
 }
 
-export type HubLog = ReturnType<typeof createLogger>;
+export type HubLog = (event: string, fields?: LogFields) => void;

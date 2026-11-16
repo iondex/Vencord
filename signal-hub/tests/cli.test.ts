@@ -89,11 +89,12 @@ test("CLI init, HTTP capture, shutdown, offline-cache restart and verified backu
     assert.ok(backups.some(file => file.endsWith(".sqlite3.json")));
     assert.equal(JSON.parse(command("status")).receipts, 2);
     assert.ok(!logs.includes("test only"));
-    assert.match(logs, /服务已启动/);
-    assert.doesNotMatch(logs, /capture_committed|消息已保存|\x1b/);
+    assert.match(logs, /INFO Hub started/);
+    assert.doesNotMatch(logs, /capture_committed|Capture saved|\x1b/);
     const entries = readdirSync(join(directory, "logs")).filter(file => file.endsWith(".jsonl"))
         .flatMap(file => readFileSync(join(directory, "logs", file), "utf8").trim().split("\n").map(line => JSON.parse(line)));
     const captures = entries.filter(entry => entry.event === "capture_committed");
     assert.equal(captures.length, 2);
     assert.ok(captures.every(entry => entry.level === "debug" && !Object.hasOwn(entry, "hash")));
+    assert.equal(entries.filter(entry => entry.event === "hub_stopped").length, 2, "Shutdown flushes the final JSONL record on each run");
 });
