@@ -78,6 +78,49 @@ test("empty exclusions are valid; cycles including Signal and cross-server route
     assert.throws(() => validateSnapshot({ ...config, signal: { ...config.signal, enabled: true, routeIds: ["route"], targetChannelId: "3" } }), /unsafe_route_cycle/);
 });
 
+test("X links require a matching source route and keep text or embed-only URLs through delivery", async context => {
+    const store = fixture(context);
+    const config = configuration();
+    store.installConfig(config);
+    const decisions: string[] = [];
+    const logDecision = (_event: string, fields: any) => decisions.push(fields.state);
+    ingest(store, capture("100", { channelId: "99", message: { id: "100", author: { id: "4" }, content: "https://x.com/example/status/123" } }));
+    planMessages(store, [], 100, logDecision);
+    assert.equal(rows(store, "messages")[0].state, "no_matching_route");
+    assert.equal(rows(store, "jobs").length, 0);
+    assert.equal(rows(store, "route_receipts").length, 0);
+    const urls = ["https://x.com/example/status/124", "https://twitter.com/example/status/125", "https://x.com/example/status/126"];
+    const messages = [
+        { content: urls[0] },
+        { content: null, embeds: [{ url: urls[1], title: "Embed only" }] },
+        { content: "", embeds: [{ url: urls[2], description: "Link preview" }] },
+    ];
+    for (const [index, message] of messages.entries()) {
+        const id = String(101 + index);
+        ingest(store, capture(id, { message: { id, type: 0, author: { id: "4" }, ...message } }));
+    }
+    planMessages(store, [], 100, logDecision);
+    planMessages(store, [], 100, logDecision);
+    assert.deepEqual(decisions, ["no_matching_route", "routed", "routed", "routed"]);
+    const posted: any[] = [];
+    const sender = createDiscordSender(store, { botToken: "test-token" }, [], (async (input: any, init?: RequestInit) => {
+        if (String(input).endsWith("/users/@me")) return json({ id: "8", bot: true });
+        if (String(input).endsWith("/channels/5")) return json({ id: "5", guild_id: "2" });
+        if (init?.method === "POST") {
+            posted.push(JSON.parse(String(init.body)));
+            return json({ id: String(200 + posted.length), channel_id: "5" });
+        }
+        throw new Error("unexpected test request");
+    }) as typeof fetch);
+    for (const url of urls) {
+        await sender.send(store.claim("deliver"));
+        assert.ok(posted.at(-1).content.includes(url));
+        assert.deepEqual(posted.at(-1).allowed_mentions, { parse: [] });
+    }
+    assert.ok(rows(store, "jobs").every(job => job.state === "sent"));
+    assert.equal(rows(store, "route_receipts").length, 3);
+});
+
 test("own outputs cannot generate jobs before ACK, after ACK, after restart or during replay", async context => {
     const store = fixture(context);
     store.installConfig(configuration());
@@ -103,10 +146,18 @@ test("own outputs cannot generate jobs before ACK, after ACK, after restart or d
         }
         throw new Error("unexpected HTTP call");
     }) as typeof fetch;
-    const sender = createDiscordSender(store, { botToken: "test-token" }, [], fetcher);
+    const sent: any[] = [];
+    const sender = createDiscordSender(store, { botToken: "test-token" }, [], fetcher, (event, fields) => {
+        assert.equal(rows(store, "jobs")[0].state, "sent", "Success is logged only after the delivery is committed");
+        sent.push({ event, ...fields });
+    });
     await sender.send(store.claim("deliver"));
     assert.equal(observedBeforeSendAck, true);
     assert.equal(rows(store, "sink_deliveries")[0].state, "sent");
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].event, "delivery_sent");
+    assert.equal(sent[0].routeId, "route");
+    assert.equal(sent[0].messageId, "200");
     assert.equal(store.ownOutput(capture("200", { channelId: "5", message: { id: "200", author: { id: "8" } } })), "self_generated");
     const restartedSender = createDiscordSender(store, { botToken: "rotated-token" }, [], fetcher);
     void restartedSender;
@@ -150,19 +201,23 @@ test("retrying a rejected webhook through a Bot updates intent identity and rema
         if (url.includes("/messages?")) return json([{ id: "200", channel_id: "5", nonce: botNonce, author: { id: "8" } }]);
         throw new Error("unexpected test request");
     }) as typeof fetch;
-    const webhookSender = createDiscordSender(store, { botToken: "test", webhooks: { "5": "https://discord.com/api/webhooks/9/test-only" } }, [], fetcher);
+    const events: any[] = [];
+    const log = (event: string, fields: any) => events.push({ event, ...fields });
+    const webhookSender = createDiscordSender(store, { botToken: "test", webhooks: { "5": "https://discord.com/api/webhooks/9/test-only" } }, [], fetcher, log);
     await webhookSender.send(store.claim("deliver"));
     assert.equal(rows(store, "sink_deliveries")[0].identity, "webhook:9");
     assert.equal(rows(store, "sink_deliveries")[0].state, "rejected");
     store.db.prepare("UPDATE jobs SET due_at=0 WHERE state='pending'").run();
-    const botSender = createDiscordSender(store, { botToken: "test" }, [], fetcher);
+    const botSender = createDiscordSender(store, { botToken: "test" }, [], fetcher, log);
     await botSender.send(store.claim("deliver"));
     assert.equal(rows(store, "sink_deliveries")[0].identity, "bot:8");
     assert.equal(rows(store, "jobs")[0].state, "uncertain");
     assert.deepEqual(rows(store, "sender_history").map(row => row.identity).sort(), ["bot:8", "webhook:9"]);
+    assert.equal(events.length, 0, "Rejected and uncertain sends cannot report success");
     await botSender.reconcile();
     assert.equal(rows(store, "jobs")[0].state, "sent");
     assert.equal(rows(store, "sink_deliveries")[0].message_id, "200");
+    assert.deepEqual(events, [{ event: "delivery_sent", jobId: rows(store, "jobs")[0].id, target: "5", messageId: "200", reconciled: true }]);
 });
 
 test("ready retries and periodic repairs run before subsequently admitted fresh work", context => {

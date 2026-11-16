@@ -9,6 +9,8 @@ import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+import { digest } from "../src/config.js";
+
 test("CLI init, HTTP capture, shutdown, offline-cache restart and verified backup", { timeout: 20_000 }, async context => {
     const directory = mkdtempSync(join(tmpdir(), "hub-cli-"));
     const cwd = fileURLToPath(new URL("..", import.meta.url));
@@ -72,7 +74,9 @@ test("CLI init, HTTP capture, shutdown, offline-cache restart and verified backu
         accountId: "1", serverId: "2", channelId: "3", excludedServerIds: [], message: { id: "4", content: "test only" },
     };
     const submit = async (payload: unknown) => fetch(`${base}/forward`, { method: "POST", body: JSON.stringify(payload) });
-    assert.equal((await submit(event)).status, 202);
+    const captured = await submit(event);
+    assert.equal(captured.status, 202);
+    assert.equal((await captured.json()).hash, digest(JSON.stringify(event)));
     await stop();
     await new Promise<void>(done => mock.close(() => done()));
     await start();
@@ -85,4 +89,11 @@ test("CLI init, HTTP capture, shutdown, offline-cache restart and verified backu
     assert.ok(backups.some(file => file.endsWith(".sqlite3.json")));
     assert.equal(JSON.parse(command("status")).receipts, 2);
     assert.ok(!logs.includes("test only"));
+    assert.match(logs, /服务已启动/);
+    assert.doesNotMatch(logs, /capture_committed|消息已保存|\x1b/);
+    const entries = readdirSync(join(directory, "logs")).filter(file => file.endsWith(".jsonl"))
+        .flatMap(file => readFileSync(join(directory, "logs", file), "utf8").trim().split("\n").map(line => JSON.parse(line)));
+    const captures = entries.filter(entry => entry.event === "capture_committed");
+    assert.equal(captures.length, 2);
+    assert.ok(captures.every(entry => entry.level === "debug" && !Object.hasOwn(entry, "hash")));
 });

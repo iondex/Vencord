@@ -1,5 +1,6 @@
 import { CaptureEnvelope } from "../contracts/ingest.js";
 import { signalEnabled } from "./config.js";
+import type { HubLog } from "./logging.js";
 import { matchingRoutes, renderMessage } from "./routing.js";
 import { Store } from "./storage.js";
 
@@ -11,7 +12,7 @@ export function safetyState(store: Store, event: CaptureEnvelope, excludedServer
     if (event.excludedServerIds.includes(event.serverId)) return "safety_pending";
 }
 
-export function planMessages(store: Store, excludedServerIds: string[], limit = 100) {
+export function planMessages(store: Store, excludedServerIds: string[], limit = 100, log?: HubLog) {
     const rows = store.db.prepare("SELECT * FROM messages WHERE state='pending' ORDER BY created_at LIMIT ?").all(limit) as any[];
     const deferred = store.db.prepare("SELECT * FROM messages WHERE state='safety_pending' ORDER BY checked_at,created_at LIMIT ?").all(Math.max(1, Math.floor(limit / 5))) as any[];
     rows.push(...deferred);
@@ -20,9 +21,9 @@ export function planMessages(store: Store, excludedServerIds: string[], limit = 
         const event = JSON.parse(row.envelope) as CaptureEnvelope;
         if (!configurations.has(row.config_hash)) configurations.set(row.config_hash, store.config(row.config_hash || undefined));
         const config = configurations.get(row.config_hash);
-        store.transaction(() => {
+        const routes = config ? matchingRoutes(config.snapshot, event) : [];
+        const decision = store.transaction(() => {
             store.db.prepare("UPDATE messages SET checked_at=? WHERE message_key=?").run(Date.now(), row.message_key);
-            const routes = config ? matchingRoutes(config.snapshot, event) : [];
             const recordRoutes = (decision: string) => {
                 for (const route of routes) store.recordRoute(row.message_key, route.routeId, route.targetChannelId, config!.hash, decision);
             };
@@ -30,11 +31,11 @@ export function planMessages(store: Store, excludedServerIds: string[], limit = 
             if (safety) {
                 store.db.prepare("UPDATE messages SET state=? WHERE message_key=?").run(safety, row.message_key);
                 recordRoutes(safety);
-                return;
+                return safety;
             }
             if (!config) {
                 store.db.prepare("UPDATE messages SET state='waiting_config' WHERE message_key=?").run(row.message_key);
-                return;
+                return "waiting_config";
             }
             let state = "no_matching_route";
             if (routes.length > 1) {
@@ -59,6 +60,10 @@ export function planMessages(store: Store, excludedServerIds: string[], limit = 
             }
             recordRoutes(state);
             store.db.prepare("UPDATE messages SET state=? WHERE message_key=?").run(state, row.message_key);
+            return state;
+        });
+        if (decision !== row.state) log?.("message_planned", {
+            messageKey: row.message_key, state: decision, routeIds: routes.map(route => route.routeId).join(","),
         });
     }
 }

@@ -50,7 +50,7 @@ if (command === "init") {
         const { settings, secrets } = configuration;
         const { excludedServerIds } = settings;
         let stopping = false;
-        const sender = createDiscordSender(store, secrets, excludedServerIds);
+        const sender = createDiscordSender(store, secrets, excludedServerIds, fetch, log);
         const cachePath = join(runtimeDirectory, "cache", "last-good.json");
         try {
             try { store.config(); } catch { store.setMetadata("config_hash", ""); }
@@ -88,7 +88,7 @@ if (command === "init") {
             if (stopping) return;
             try {
                 store.recoverLeases();
-                planMessages(store, excludedServerIds);
+                planMessages(store, excludedServerIds, 100, log);
                 if (store.metadata("paused") === "true") return;
                 while (deliveryWorkers < 4) {
                     const job = preferSignal ? store.claim("signal") ?? store.claim("deliver") : store.claim("deliver") ?? store.claim("signal");
@@ -100,7 +100,7 @@ if (command === "init") {
                         deliveryWorkers--;
                         try {
                             const state = store.db.prepare("SELECT state,error FROM jobs WHERE id=?").get(job.id) as any;
-                            log("delivery_finished", { jobId: job.id, kind: job.kind, target: job.target, attempts: job.attempts, state: state.state, code: state.error, durationMs: Date.now() - startedAt });
+                            if (state.state !== "sent") log("delivery_finished", { jobId: job.id, routeId: job.route_id, messageKey: job.message_key, kind: job.kind, target: job.target, attempts: job.attempts, state: state.state, code: state.error, durationMs: Date.now() - startedAt });
                         } catch { log("delivery_status_unavailable"); }
                     });
                 }

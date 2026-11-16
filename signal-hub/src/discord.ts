@@ -1,4 +1,5 @@
 import { digest } from "./config.js";
+import type { HubLog } from "./logging.js";
 import { executable } from "./queue.js";
 import { targetOverlapsSource } from "./routing.js";
 import { Store } from "./storage.js";
@@ -8,7 +9,7 @@ export interface DiscordSecrets {
     webhooks?: Record<string, string>;
 }
 
-export function createDiscordSender(store: Store, secrets: DiscordSecrets, excludedServerIds: string[], fetcher: typeof fetch = fetch) {
+export function createDiscordSender(store: Store, secrets: DiscordSecrets, excludedServerIds: string[], fetcher: typeof fetch = fetch, log?: HubLog) {
     const identities = new Map<string, { identity: string; channel: any; url: string; headers: Record<string, string>; webhook: boolean; expiresAt: number; }>();
     async function request(url: string, init: RequestInit = {}) {
         return fetcher(url, { ...init, signal: AbortSignal.timeout(15_000), redirect: "error" });
@@ -54,6 +55,7 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
     }
 
     async function send(job: any) {
+        const startedAt = Date.now();
         const context = executable(store, job, excludedServerIds);
         if (!context) {
             store.db.prepare("UPDATE jobs SET state='held',error='current_safety_or_config_veto' WHERE id=?").run(job.id);
@@ -102,6 +104,7 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
             store.db.prepare("UPDATE delivery_attempts SET outcome='sending' WHERE id=?").run(attemptId);
         });
         let responseStatus = 0;
+        let messageId: string;
         try {
             const response = await request(target.url, {
                 method: "POST", headers: { ...target.headers, "Content-Type": "application/json" },
@@ -135,6 +138,7 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
                 store.db.prepare("UPDATE sink_deliveries SET state='sent',message_id=?,updated_at=? WHERE delivery_key=?").run(message.id, Date.now(), job.id);
                 store.db.prepare("UPDATE jobs SET state='sent',error='' WHERE id=?").run(job.id);
             });
+            messageId = message.id;
         } catch {
             store.transaction(() => {
                 finishAttempt("uncertain", responseStatus, "send_outcome_unknown");
@@ -142,7 +146,12 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
                 store.db.prepare("UPDATE sink_deliveries SET state='uncertain',updated_at=? WHERE delivery_key=?").run(Date.now(), job.id);
                 store.alert("delivery_uncertain", "A Discord send has an uncertain outcome; reconciliation is required before retry", "critical");
             });
+            return;
         }
+        log?.("delivery_sent", {
+            jobId: job.id, messageKey: job.message_key, routeId: job.route_id, routeName: context.route.name,
+            kind: job.kind, target: job.target, messageId, attempts: job.attempts, durationMs: Date.now() - startedAt,
+        });
     }
 
     async function reconcile() {
@@ -164,6 +173,7 @@ export function createDiscordSender(store: Store, secrets: DiscordSecrets, exclu
                     store.db.prepare("UPDATE sink_deliveries SET state='sent',message_id=?,updated_at=? WHERE delivery_key=?").run(found.id, Date.now(), row.delivery_key);
                     store.db.prepare("UPDATE jobs SET state='sent',error='' WHERE id=?").run(row.job_id);
                 });
+                log?.("delivery_sent", { jobId: row.job_id, target: row.target, messageId: found.id, reconciled: true });
             } finally { store.setMetadata("reconciliation_cursor", row.delivery_key); }
         }
     }

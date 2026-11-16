@@ -104,7 +104,7 @@ export function createHubHttp(store: Store, options: { pairingToken: string; adm
             }
             try {
                 const ack = store.ingest(envelope, raw);
-                options.log?.("capture_committed", { eventId: envelope.eventId, hash: ack.hash, duplicate: ack.duplicate, bytes });
+                options.log?.("capture_committed", { eventId: envelope.eventId, duplicate: ack.duplicate, bytes });
                 json(response, 202, ack);
                 options.wake?.();
             } catch (error) {
