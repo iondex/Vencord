@@ -22,6 +22,8 @@ Forwarder：入口及设置 744 行，Native 537 行，Local 交接队列 266 �
 
 Transcribe：入口 313 行，会话运行时 217 行，采集 135 行，Native 21 行，provider 148 行，文本投递 84 行，断句 67 行，类型 65 行，直播选择 15 行。
 
+Channel-logger 的历史细分为入口 498 行、logic 509 行、Native 56 行；只记录上轮统计，不安排后续维护或改造。
+
 | Signal-hub 生产部分 | 文件数 | 行数 |
 | --- | ---: | ---: |
 | 服务端 TypeScript | 19 | 1,902 |

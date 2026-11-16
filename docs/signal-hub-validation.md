@@ -13,6 +13,10 @@
 - 重新 `git fetch origin` 后，`HEAD...origin/main` 为本地领先 45、上游待合并 0；上游最新提交为 `d07030c0`。本轮无需合并上游。
 - 本轮不更改 Channel-logger、Transcribe 或其注册，不清空数据库，不释放 uncertain，不执行 inject。修改 Native 后需由用户完整退出再打开 Discord。
 - 根 `pnpm-lock.yaml` 保留用户原有修改，SHA-256 为 `79ffe60a1a390df61582a03e5496b139bd4f11734291e25e8c456107a6e1e6ca`，不纳入提交。
+- 修复、运维文档及完整迁移规划已以 `c0e9257c` 提交并推送 `iondex/local`。首次 SSH 推送遇到连接关闭，重试成功，没有修改远端或传输配置。
+- 推送后对生产监控、只读数据库、采集机队列及有限 Discord 历史执行核对，脱敏记录见生产报告和同名 JSON；没有生产写入、通知发送或重发。最后快照为 21:34:26（Asia/Shanghai）。
+- 最终复核新增“同名隔离不能阻塞后续消息”的失败回归，再修复为保留两份冲突证据并禁止重交；恢复套件、类型和开发构建重新验证，作为后续小提交，不改写已推送历史。
+- 冲突隔离补丁提交为 `57d1a989`。最终 12 项队列结果、`pnpm test:ts`、`pnpm build --dev`、`pnpm fmt:check` 通过；`localTransport.ts` 和新增恢复测试正式定向 lint 均通过。生产分析文档和 JSON 一并做格式、字段和凭据泄漏检查，随后随记录提交推送。
 
 日期：2026-11-16，Asia/Shanghai。
 

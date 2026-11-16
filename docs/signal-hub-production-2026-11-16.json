@@ -1,0 +1,976 @@
+{
+    "schemaVersion": 1,
+    "timeZone": "Asia/Shanghai",
+    "changeCommit": "c0e9257c",
+    "scope": "Read-only, no credentials, raw messages or request bodies",
+    "before": {
+        "observedAt": 1794834358498,
+        "health": "degraded",
+        "paused": false,
+        "testMode": false,
+        "summary": {
+            "messages": 6292,
+            "receipts": 6292,
+            "delivered": 354,
+            "capturedLastHour": 1546,
+            "deliveredLastHour": 58,
+            "queued": 3,
+            "oldestPendingAt": 1794822229329,
+            "lastCapturedAt": 1794834355697,
+            "lastDeliveredAt": 1794834351471,
+            "successRate24h": 0.9725274725274725
+        },
+        "config": {
+            "syncedAt": 1794834169635,
+            "ageSeconds": 188,
+            "routes": 51,
+            "enabledRoutes": 45
+        },
+        "traffic": {
+            "minute": {
+                "captured": 44,
+                "received": 44,
+                "delivered": 3,
+                "failedAttempts": 0
+            },
+            "hour": {
+                "captured": 1546,
+                "received": 1546,
+                "delivered": 58,
+                "failedAttempts": 2
+            },
+            "day": {
+                "captured": 6292,
+                "received": 6292,
+                "delivered": 354,
+                "failedAttempts": 10
+            },
+            "today": {
+                "captured": 6292,
+                "received": 6292,
+                "delivered": 354,
+                "failedAttempts": 10
+            }
+        },
+        "messageStates": [
+            {
+                "state": "before_forward_cutoff",
+                "total": 726
+            },
+            {
+                "state": "keyword_blocked",
+                "total": 1
+            },
+            {
+                "state": "no_matching_route",
+                "total": 4067
+            },
+            {
+                "state": "routed",
+                "total": 357
+            },
+            {
+                "state": "self_generated",
+                "total": 306
+            },
+            {
+                "state": "test_mode_filtered",
+                "total": 835
+            }
+        ],
+        "jobStates": [
+            {
+                "kind": "deliver",
+                "state": "sent",
+                "total": 354
+            },
+            {
+                "kind": "deliver",
+                "state": "uncertain",
+                "total": 3
+            },
+            {
+                "kind": "extract",
+                "state": "review",
+                "total": 1
+            }
+        ],
+        "activeAlerts": [
+            {
+                "code": "delivery_uncertain",
+                "severity": "critical"
+            },
+            {
+                "code": "delivery_retries_exhausted",
+                "severity": "critical"
+            },
+            {
+                "code": "history_coverage_degraded",
+                "severity": "warning"
+            },
+            {
+                "code": "delivery_attention",
+                "severity": "warning"
+            }
+        ],
+        "recentFailures": [
+            {
+                "time": 1794832439765,
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "target": "1516040046476660737",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794830897666,
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "target": "1510869601657819218",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794829783593,
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "target": "1510869601657819218",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794828992484,
+                "routeId": "ec5d4c103bd5474b8f37f5edce38902e",
+                "target": "1514155656456966284",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794828837482,
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "target": "1516040046476660737",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794828695615,
+                "routeId": "3f2d60c8a4f545faa59bc87a8616e5e5",
+                "target": "1509691862015807560",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794827274688,
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "target": "1510869601657819218",
+                "outcome": "uncertain",
+                "status": 0,
+                "code": "send_outcome_unknown"
+            },
+            {
+                "time": 1794824946793,
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "target": "1510869601657819218",
+                "outcome": "uncertain",
+                "status": 0,
+                "code": "send_outcome_unknown"
+            },
+            {
+                "time": 1794822232361,
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "target": "1516040046476660737",
+                "outcome": "uncertain",
+                "status": 0,
+                "code": "send_outcome_unknown"
+            },
+            {
+                "time": 1794821272686,
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "target": "1516040046476660737",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            }
+        ],
+        "deliveryDurationP95Ms": 5280,
+        "quarantined": 0,
+        "resources": {
+            "databaseBytes": 42188712,
+            "rssBytes": 66568192,
+            "heapBytes": 24337128,
+            "pid": 22167
+        },
+        "routes": [
+            {
+                "routeId": "3f2d60c8a4f545faa59bc87a8616e5e5",
+                "name": "newsfeed",
+                "target": "1509691862015807560",
+                "enabled": true,
+                "matched": 21,
+                "sent": 15,
+                "queued": 0,
+                "attention": 0,
+                "lastSentAt": 1794834221330
+            },
+            {
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "name": "futu-news",
+                "target": "1510869601657819218",
+                "enabled": true,
+                "matched": 311,
+                "sent": 290,
+                "queued": 2,
+                "attention": 2,
+                "lastSentAt": 1794834341324
+            },
+            {
+                "routeId": "ec5d4c103bd5474b8f37f5edce38902e",
+                "name": "alpha-newsfeed",
+                "target": "1514155656456966284",
+                "enabled": true,
+                "matched": 21,
+                "sent": 15,
+                "queued": 0,
+                "attention": 0,
+                "lastSentAt": 1794834116435
+            },
+            {
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "name": "jinshi-vip",
+                "target": "1516040046476660737",
+                "enabled": true,
+                "matched": 48,
+                "sent": 33,
+                "queued": 1,
+                "attention": 1,
+                "lastSentAt": 1794834351471
+            },
+            {
+                "routeId": "324418d9d7ae4bca965143d21a48be48",
+                "name": "Jtradezz",
+                "target": "1525850457925484625",
+                "enabled": true,
+                "matched": 1,
+                "sent": 1,
+                "queued": 0,
+                "attention": 0,
+                "lastSentAt": 1794831361106
+            },
+            {
+                "routeId": "de7613f3c220400481d74a2dc785c3f6",
+                "name": "optionbuffet",
+                "target": "1536293284744269874",
+                "enabled": true,
+                "matched": 1,
+                "sent": 0,
+                "queued": 0,
+                "attention": 0,
+                "lastSentAt": null
+            }
+        ]
+    },
+    "after": {
+        "observedAt": 1794836066140,
+        "health": "degraded",
+        "paused": false,
+        "testMode": false,
+        "summary": {
+            "messages": 7321,
+            "receipts": 7321,
+            "delivered": 402,
+            "capturedLastHour": 1890,
+            "deliveredLastHour": 85,
+            "queued": 3,
+            "oldestPendingAt": 1794822229329,
+            "lastCapturedAt": 1794836065629,
+            "lastDeliveredAt": 1794836049600,
+            "successRate24h": 0.9733656174334141
+        },
+        "config": {
+            "syncedAt": 1794835969179,
+            "ageSeconds": 96,
+            "routes": 51,
+            "enabledRoutes": 45
+        },
+        "traffic": {
+            "minute": {
+                "captured": 43,
+                "received": 43,
+                "delivered": 1,
+                "failedAttempts": 1
+            },
+            "hour": {
+                "captured": 1890,
+                "received": 1890,
+                "delivered": 85,
+                "failedAttempts": 1
+            },
+            "day": {
+                "captured": 7321,
+                "received": 7321,
+                "delivered": 402,
+                "failedAttempts": 11
+            },
+            "today": {
+                "captured": 7321,
+                "received": 7321,
+                "delivered": 402,
+                "failedAttempts": 11
+            }
+        },
+        "messageStates": [
+            {
+                "state": "before_forward_cutoff",
+                "total": 726
+            },
+            {
+                "state": "keyword_blocked",
+                "total": 1
+            },
+            {
+                "state": "no_matching_route",
+                "total": 5009
+            },
+            {
+                "state": "routed",
+                "total": 405
+            },
+            {
+                "state": "self_generated",
+                "total": 345
+            },
+            {
+                "state": "test_mode_filtered",
+                "total": 835
+            }
+        ],
+        "jobStates": [
+            {
+                "kind": "deliver",
+                "state": "sent",
+                "total": 402
+            },
+            {
+                "kind": "deliver",
+                "state": "uncertain",
+                "total": 3
+            },
+            {
+                "kind": "extract",
+                "state": "retry_wait",
+                "total": 1
+            },
+            {
+                "kind": "extract",
+                "state": "review",
+                "total": 1
+            }
+        ],
+        "deliveryDurationP95Ms": 5321,
+        "quarantined": 0,
+        "resources": {
+            "databaseBytes": 48951208,
+            "rssBytes": 65142784,
+            "heapBytes": 27393232,
+            "pid": 22167
+        },
+        "routes": [
+            {
+                "routeId": "3f2d60c8a4f545faa59bc87a8616e5e5",
+                "name": "newsfeed",
+                "target": "1509691862015807560",
+                "enabled": true,
+                "matched": 26,
+                "sent": 20,
+                "queued": 0,
+                "attention": 0,
+                "lastSentAt": 1794835983199
+            },
+            {
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "name": "futu-news",
+                "target": "1510869601657819218",
+                "enabled": true,
+                "matched": 340,
+                "sent": 319,
+                "queued": 2,
+                "attention": 2,
+                "lastSentAt": 1794835962872
+            },
+            {
+                "routeId": "ec5d4c103bd5474b8f37f5edce38902e",
+                "name": "alpha-newsfeed",
+                "target": "1514155656456966284",
+                "enabled": true,
+                "matched": 27,
+                "sent": 21,
+                "queued": 0,
+                "attention": 0,
+                "lastSentAt": 1794836049600
+            },
+            {
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "name": "jinshi-vip",
+                "target": "1516040046476660737",
+                "enabled": true,
+                "matched": 52,
+                "sent": 37,
+                "queued": 1,
+                "attention": 1,
+                "lastSentAt": 1794835889077
+            },
+            {
+                "routeId": "324418d9d7ae4bca965143d21a48be48",
+                "name": "Jtradezz",
+                "target": "1525850457925484625",
+                "enabled": true,
+                "matched": 2,
+                "sent": 2,
+                "queued": 0,
+                "attention": 0,
+                "lastSentAt": 1794835250563
+            },
+            {
+                "routeId": "29e8dad5e98e40dbac02bd1fa9d0e970",
+                "name": "enrich-profit",
+                "target": "1525848182796455946",
+                "enabled": true,
+                "matched": 1,
+                "sent": 1,
+                "queued": 0,
+                "attention": 0,
+                "lastSentAt": 1794834410931
+            },
+            {
+                "routeId": "ae739ea072444b66b63c96f3cf0c687f",
+                "name": "mike-watchlist",
+                "target": "1532051973338173470",
+                "enabled": true,
+                "matched": 2,
+                "sent": 2,
+                "queued": 0,
+                "attention": 0,
+                "lastSentAt": 1794835961460
+            },
+            {
+                "routeId": "de7613f3c220400481d74a2dc785c3f6",
+                "name": "optionbuffet",
+                "target": "1536293284744269874",
+                "enabled": true,
+                "matched": 1,
+                "sent": 0,
+                "queued": 0,
+                "attention": 0,
+                "lastSentAt": null
+            }
+        ],
+        "activeAlerts": [
+            {
+                "code": "delivery_uncertain",
+                "severity": "critical"
+            },
+            {
+                "code": "delivery_retries_exhausted",
+                "severity": "critical"
+            },
+            {
+                "code": "history_coverage_degraded",
+                "severity": "warning"
+            },
+            {
+                "code": "delivery_attention",
+                "severity": "warning"
+            },
+            {
+                "code": "signal_extraction",
+                "severity": "warning"
+            },
+            {
+                "code": "discord_safety",
+                "severity": "warning"
+            }
+        ],
+        "recentFailures": [
+            {
+                "time": 1794836046825,
+                "routeId": "ec5d4c103bd5474b8f37f5edce38902e",
+                "target": "1514155656456966284",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794832439765,
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "target": "1516040046476660737",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794830897666,
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "target": "1510869601657819218",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794829783593,
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "target": "1510869601657819218",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794828992484,
+                "routeId": "ec5d4c103bd5474b8f37f5edce38902e",
+                "target": "1514155656456966284",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794828837482,
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "target": "1516040046476660737",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794828695615,
+                "routeId": "3f2d60c8a4f545faa59bc87a8616e5e5",
+                "target": "1509691862015807560",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            },
+            {
+                "time": 1794827274688,
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "target": "1510869601657819218",
+                "outcome": "uncertain",
+                "status": 0,
+                "code": "send_outcome_unknown"
+            },
+            {
+                "time": 1794824946793,
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "target": "1510869601657819218",
+                "outcome": "uncertain",
+                "status": 0,
+                "code": "send_outcome_unknown"
+            },
+            {
+                "time": 1794822232361,
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "target": "1516040046476660737",
+                "outcome": "uncertain",
+                "status": 0,
+                "code": "send_outcome_unknown"
+            },
+            {
+                "time": 1794821272686,
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "target": "1516040046476660737",
+                "outcome": "preflight_failed",
+                "status": 0,
+                "code": "discord_connection_failed"
+            }
+        ]
+    },
+    "details": {
+        "observedAt": 1794835836452,
+        "uncertain": [
+            {
+                "job": "7cc61e4a",
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "target": "1510869601657819218",
+                "identity": "webhook:1537383683353223180",
+                "attempts": 1,
+                "error": "send_outcome_unknown",
+                "startedAt": 1794827271672,
+                "finishedAt": 1794827274688,
+                "status": 0,
+                "sinkMessageId": ""
+            },
+            {
+                "job": "7db84868",
+                "routeId": "779c0015bcaa4500b00b2537bec67917",
+                "target": "1516040046476660737",
+                "identity": "webhook:1537571792682487818",
+                "attempts": 1,
+                "error": "send_outcome_unknown",
+                "startedAt": 1794822229347,
+                "finishedAt": 1794822232361,
+                "status": 0,
+                "sinkMessageId": ""
+            },
+            {
+                "job": "805b1600",
+                "routeId": "b3ab17d23f9145b59b7b372031c2e0b0",
+                "target": "1510869601657819218",
+                "identity": "webhook:1537383683353223180",
+                "attempts": 1,
+                "error": "send_outcome_unknown",
+                "startedAt": 1794824943775,
+                "finishedAt": 1794824946793,
+                "status": 0,
+                "sinkMessageId": ""
+            }
+        ],
+        "failures": [
+            {
+                "outcome": "preflight_failed",
+                "error": "discord_connection_failed",
+                "currentState": "sent",
+                "total": 8
+            },
+            {
+                "outcome": "uncertain",
+                "error": "send_outcome_unknown",
+                "currentState": "uncertain",
+                "total": 3
+            }
+        ],
+        "review": [
+            {
+                "job": "7303aeaf",
+                "kind": "extract",
+                "state": "review",
+                "attempts": 19,
+                "recovery_cycles": 3,
+                "error": "stale_signal"
+            }
+        ],
+        "alerts": [
+            {
+                "code": "history_coverage_degraded",
+                "severity": "warning",
+                "active": 1,
+                "sentAt": 0,
+                "attempts": 0
+            },
+            {
+                "code": "discord_safety",
+                "severity": "warning",
+                "active": 1,
+                "sentAt": 0,
+                "attempts": 0
+            },
+            {
+                "code": "delivery_uncertain",
+                "severity": "critical",
+                "active": 1,
+                "sentAt": 0,
+                "attempts": 0
+            },
+            {
+                "code": "delivery_attention",
+                "severity": "warning",
+                "active": 1,
+                "sentAt": 0,
+                "attempts": 0
+            },
+            {
+                "code": "signal_extraction",
+                "severity": "warning",
+                "active": 1,
+                "sentAt": 0,
+                "attempts": 0
+            },
+            {
+                "code": "delivery_retries_exhausted",
+                "severity": "critical",
+                "active": 1,
+                "sentAt": 0,
+                "attempts": 0
+            }
+        ],
+        "notificationMetadata": [],
+        "age": {
+            "firstCapturedAt": 1794814110212,
+            "latestCapturedAt": 1794835835772
+        },
+        "routeDecisions": [
+            {
+                "decision": "before_forward_cutoff",
+                "total": 31
+            },
+            {
+                "decision": "keyword_blocked",
+                "total": 1
+            },
+            {
+                "decision": "routed",
+                "total": 405
+            },
+            {
+                "decision": "test_mode_filtered",
+                "total": 14
+            }
+        ],
+        "presence": {
+            "file": {
+                "botToken": true,
+                "modelApiKey": false,
+                "dingTalkWebhook": false,
+                "cfToken": false,
+                "webhookTargets": 33
+            },
+            "processEnvironment": {
+                "readable": true,
+                "botToken": false,
+                "modelApiKey": false,
+                "dingTalkWebhook": false,
+                "cfToken": false,
+                "proxy": true
+            }
+        },
+        "settings": {
+            "testMode": false,
+            "forwardAfter": "2026-11-16T07:07:45.550Z",
+            "botHistoryEnabled": false,
+            "recoveryAccountConfigured": false,
+            "loggerRecoveryConfigured": false
+        },
+        "processStarted": "Mon Nov 16 17:52:37 2026",
+        "secretsFileModifiedAt": 1794811915875.625,
+        "webhookHistoryChecks": {
+            "observedAt": 1794835893763,
+            "method": "read-only Bot GET around send time; webhook identity + within 60s + identical content + expected embed subset",
+            "jobs": [
+                {
+                    "job": "7db84868",
+                    "target": "1516040046476660737",
+                    "startedAt": 1794822229347,
+                    "identity": "webhook:1537571792682487818",
+                    "httpStatus": 200,
+                    "examined": 76,
+                    "expectedEmbedCount": 1,
+                    "candidates": [],
+                    "window": {
+                        "firstAt": 1794791851161,
+                        "lastAt": 1794835888944
+                    }
+                },
+                {
+                    "job": "805b1600",
+                    "target": "1510869601657819218",
+                    "startedAt": 1794824943775,
+                    "identity": "webhook:1537383683353223180",
+                    "httpStatus": 200,
+                    "examined": 100,
+                    "expectedEmbedCount": 1,
+                    "candidates": [],
+                    "window": {
+                        "firstAt": 1794821923931,
+                        "lastAt": 1794829205499
+                    }
+                },
+                {
+                    "job": "7cc61e4a",
+                    "target": "1510869601657819218",
+                    "startedAt": 1794827271672,
+                    "identity": "webhook:1537383683353223180",
+                    "httpStatus": 200,
+                    "examined": 100,
+                    "expectedEmbedCount": 1,
+                    "candidates": [],
+                    "window": {
+                        "firstAt": 1794822797199,
+                        "lastAt": 1794830708261
+                    }
+                }
+            ],
+            "nearbyChecks": [
+                {
+                    "job": "7db84868",
+                    "httpStatus": 200,
+                    "nearbyMessages": 1,
+                    "nearbyFromExpectedWebhook": 1,
+                    "identicalContentAnywhereInWindow": 37,
+                    "nearestFromExpectedWebhook": [
+                        {
+                            "messageId": "1571822846718771261",
+                            "deltaMs": -59633
+                        },
+                        {
+                            "messageId": "1571823363091988554",
+                            "deltaMs": 63480
+                        }
+                    ]
+                },
+                {
+                    "job": "805b1600",
+                    "httpStatus": 200,
+                    "nearbyMessages": 0,
+                    "nearbyFromExpectedWebhook": 0,
+                    "identicalContentAnywhereInWindow": 100,
+                    "nearestFromExpectedWebhook": [
+                        {
+                            "messageId": "1571835073597276312",
+                            "deltaMs": 141054
+                        },
+                        {
+                            "messageId": "1571835255537795207",
+                            "deltaMs": 184432
+                        }
+                    ]
+                },
+                {
+                    "job": "7cc61e4a",
+                    "httpStatus": 200,
+                    "nearbyMessages": 1,
+                    "nearbyFromExpectedWebhook": 1,
+                    "identicalContentAnywhereInWindow": 100,
+                    "nearestFromExpectedWebhook": [
+                        {
+                            "messageId": "1571844453440815198",
+                            "deltaMs": 49486
+                        },
+                        {
+                            "messageId": "1571843767860858911",
+                            "deltaMs": -113969
+                        }
+                    ]
+                }
+            ]
+        },
+        "latency": {
+            "observedAt": 1794835926326,
+            "windowSeconds": 3600,
+            "unit": "milliseconds",
+            "distributions": {
+                "handoff": {
+                    "samples": 76,
+                    "validSamples": 76,
+                    "invalidOrNegative": 0,
+                    "p50Ms": 154,
+                    "p95Ms": 268,
+                    "p99Ms": 284,
+                    "maxMs": 284
+                },
+                "collectorToDelivery": {
+                    "samples": 76,
+                    "validSamples": 76,
+                    "invalidOrNegative": 0,
+                    "p50Ms": 4965,
+                    "p95Ms": 9977,
+                    "p99Ms": 11415,
+                    "maxMs": 11415
+                },
+                "sourceToDelivery": {
+                    "samples": 76,
+                    "validSamples": 76,
+                    "invalidOrNegative": 0,
+                    "p50Ms": 5346,
+                    "p95Ms": 10294,
+                    "p99Ms": 12097,
+                    "maxMs": 12097
+                }
+            }
+        },
+        "collectorSpool": {
+            "observedAt": 1794835926326,
+            "folders": {
+                "pending": {
+                    "json": 0,
+                    "temporary": 0,
+                    "oldestModifiedAt": null,
+                    "newestModifiedAt": null
+                },
+                "acked": {
+                    "json": 2663,
+                    "temporary": 0,
+                    "oldestModifiedAt": 1794830401476.7107,
+                    "newestModifiedAt": 1794835925602.4568
+                },
+                "quarantine": {
+                    "json": 0,
+                    "temporary": 0,
+                    "oldestModifiedAt": null,
+                    "newestModifiedAt": null
+                }
+            },
+            "cleanup": {
+                "lastCutoff": 1794830400000,
+                "lastRunAt": 1794830400917,
+                "removed": 7291,
+                "freedBytes": 13153954,
+                "totalRemoved": 7291
+            }
+        },
+        "extraction": {
+            "observedAt": 1794835926326,
+            "states": [
+                {
+                    "state": "retry_wait",
+                    "total": 1,
+                    "minAttempts": 12,
+                    "maxAttempts": 12
+                },
+                {
+                    "state": "review",
+                    "total": 1,
+                    "minAttempts": 19,
+                    "maxAttempts": 19
+                }
+            ],
+            "errors": [
+                {
+                    "error": "signal_extraction_failed",
+                    "total": 1
+                },
+                {
+                    "error": "stale_signal",
+                    "total": 1
+                }
+            ],
+            "stored": 0,
+            "finalStates": [
+                {
+                    "state": "retry_wait",
+                    "total": 1,
+                    "minAttempts": 18,
+                    "maxAttempts": 18
+                },
+                {
+                    "state": "review",
+                    "total": 1,
+                    "minAttempts": 19,
+                    "maxAttempts": 19
+                }
+            ],
+            "finalErrors": [
+                {
+                    "error": "signal_extraction_failed",
+                    "total": 1
+                },
+                {
+                    "error": "stale_signal",
+                    "total": 1
+                }
+            ]
+        },
+        "finalChecksAt": 1794836066157,
+        "finalAttemptChecksAt": 1794836086002,
+        "exhaustedKinds": [
+            {
+                "kind": "extract",
+                "state": "retry_wait",
+                "total": 1
+            },
+            {
+                "kind": "extract",
+                "state": "review",
+                "total": 1
+            }
+        ]
+    }
+}
